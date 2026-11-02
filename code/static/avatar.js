@@ -7,6 +7,7 @@ class RealFaceAvatar {
     this.speaking = false;
     this.interrupted = false;
     this.resumeTimer = null;
+    this.connectTimer = null;
     this.options = {};
     this.video = document.getElementById('avatarVideo');
     this.status = document.getElementById('avatarStatus');
@@ -28,21 +29,31 @@ class RealFaceAvatar {
       return;
     }
     this.button.dataset.connecting = 'true';
+    const generation = ++this.generation;
     this.button.textContent = 'Cancel connection';
-    this.setStatus('Connecting to your tutor… First startup can take a few minutes.');
+    this.setStatus('Connecting to your tutor…');
+    this.connectTimer = setTimeout(() => {
+      if (generation === this.generation && !this.active) {
+        this.fail('Connection took too long. Try connecting again.');
+      }
+    }, 45000);
     try {
       await this.options.connect();
       // The user may cancel while the WebSocket is connecting.
-      if (this.button.dataset.connecting === 'true') this.options.send({type: 'avatar_start'});
+      if (generation === this.generation && this.button.dataset.connecting === 'true') {
+        this.options.send({type: 'avatar_start'});
+      }
     } catch {
-      this.fail('Unable to connect. Check that the server is running.');
+      if (generation === this.generation) this.fail('Unable to connect. Check that the server is running.');
     }
   }
 
   handleMessage({type, content}) {
     if (!type.startsWith('avatar_')) return false;
-    if (type === 'avatar_session') void this.attach(content);
-    else if (type === 'avatar_status') this.setStatus(content);
+    if (type === 'avatar_session') {
+      if (this.button.dataset.connecting === 'true') void this.attach(content);
+    }
+    else if (type === 'avatar_status' && this.button.dataset.connecting === 'true') this.setStatus(content);
     else if (type === 'avatar_error') this.fail(content);
     else if (type === 'avatar_turn_start') {
       this.interrupted = false;
@@ -60,7 +71,7 @@ class RealFaceAvatar {
   }
 
   async attach(session) {
-    const generation = ++this.generation;
+    const generation = this.generation;
     try {
       const {AvatarConnection} = await import('/static/vendor/openspline/index.js');
       if (generation !== this.generation) return;
@@ -69,6 +80,7 @@ class RealFaceAvatar {
       connection.addEventListener('statechange', event => {
         if (this.connection !== connection) return;
         if (event.detail === 'ready') {
+          clearTimeout(this.connectTimer);
           if (!this.active) {
             this.options.onReady?.();
             this.active = true;
@@ -88,10 +100,14 @@ class RealFaceAvatar {
           this.fail('Live face disconnected. Reconnect to restore video.');
         }
       });
-      connection.addEventListener('autoplayblocked', () => { this.playButton.hidden = false; });
+      connection.addEventListener('autoplayblocked', () => {
+        if (this.connection === connection) this.playButton.hidden = false;
+      });
       // The player's turnend means generation ended, not that audio finished
       // playing. Only avatar_turn_end from the publisher's drain unlocks input.
-      connection.addEventListener('error', () => this.fail('The avatar stream failed. Voice-only mode is available.'));
+      connection.addEventListener('error', () => {
+        if (this.connection === connection) this.fail('The avatar stream failed. Voice-only mode is available.');
+      });
       this.video.hidden = false;
       await connection.connect();
     } catch {
@@ -112,6 +128,7 @@ class RealFaceAvatar {
 
   disconnect(notify = true) {
     clearTimeout(this.resumeTimer);
+    clearTimeout(this.connectTimer);
     ++this.generation;
     this.active = false;
     this.speaking = false;

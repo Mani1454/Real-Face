@@ -234,8 +234,7 @@ function ensureSocket() {
       clearTimeout(connectionTimeout);
       if (socket !== connection) return;
       setStatus("ONLINE", "#00f0ff");
-      // Tell backend to clear history so opening another chat starts fresh with zero previous memory
-      socket.send(JSON.stringify({ type: 'clear_history' }));
+      // The server resets each new session before processing client messages.
       // Worklet delivers exact 16kHz PCM for Deepgram STT
       socket.send(JSON.stringify({
         type: 'client_audio_config',

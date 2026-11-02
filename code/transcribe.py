@@ -283,8 +283,16 @@ class DeepgramTranscriptionProcessor:
             self._close_socket(expected_socket=socket)
 
     def abort_generation(self) -> None:
+        # Reset is local cancellation. Sending Finalize would flush old speech
+        # and can block indefinitely behind a stalled network send.
         self._accumulated_parts.clear()
         self.realtime_text = None
+        self.final_transcription = None
+        self._last_final_time = 0.0
+
+    def perform_final(self, audio_bytes: Optional[bytes] = None) -> None:
+        """Explicit remote finalization, separate from history reset/abort."""
+        self.abort_generation()
         try:
             with self._socket_lock:
                 socket = self._socket
@@ -292,9 +300,6 @@ class DeepgramTranscriptionProcessor:
                 socket.send_finalize()
         except Exception:
             pass
-
-    def perform_final(self, audio_bytes: Optional[bytes] = None) -> None:
-        self.abort_generation()
 
     def shutdown(self) -> None:
         logger.info("👂🔌 Shutting down Deepgram transcription processor...")

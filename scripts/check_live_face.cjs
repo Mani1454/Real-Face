@@ -2,13 +2,22 @@
 const {chromium} = require('@playwright/test');
 const fs = require('node:fs');
 (async () => {
-  const browser = await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL || 'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});
+  const microphoneFirst = process.argv.includes('--mic-first');
+  const args = ['--autoplay-policy=no-user-gesture-required'];
+  if(microphoneFirst) args.push('--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream');
+  const browser = await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL || 'chrome',headless:true,args});
   try {
     const page = await browser.newPage({viewport:{width:1440,height:1080}});
     const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.goto(process.argv[2] || 'http://localhost:8000');
     await page.waitForFunction(()=>!document.querySelector('#chatInput').disabled,null,{timeout:15000});
+    if(microphoneFirst) {
+      await page.locator('#startBtn').click();
+      await page.waitForFunction(()=>isRecording && micWorkletNode !== null,null,{timeout:15000});
+      // Exercise the explicit reset path as well as fresh-session initialization.
+      await page.locator('#resetBtn').click();
+    }
     await page.locator('#avatarConnectBtn').click();
     await page.waitForFunction(()=>window.realFace.active || document.querySelector('#setupNotice').textContent.includes('Another conversation'),null,{timeout:240000});
     if(!await page.evaluate(()=>window.realFace.active)) throw new Error('Another conversation is active. Close it before running this check.');
@@ -76,6 +85,7 @@ const fs = require('node:fs');
     });
     fs.writeFileSync('test-results/live-face-demo.webm',Buffer.from(result.recording,'base64'));
     delete result.recording;
+    result.microphoneFirst=microphoneFirst;
     result.reply=await page.locator('.log-entry.assistant .log-text').last().textContent();
     result.pageErrors=errors;
     result.passed=result.frames>1 && result.maxPixelDifference>0.1 && !!result.reply && errors.length===0;

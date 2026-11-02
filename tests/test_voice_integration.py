@@ -3,7 +3,7 @@ import asyncio
 import base64
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import server
 import speech_pipeline_manager as pipeline
 from avatar_bridge import AvatarBridge
+from transcribe import DeepgramTranscriptionProcessor
 
 PCM = b'\x00\x01' * 200
 REPLY = 'What did you enjoy about your trip?'
@@ -95,6 +96,41 @@ def test_real_coaching_pipeline_delivers_native_pcm_and_grammar_without_network(
         assert chunks[0]['sample_rate'] == 48000
         assert next(event['content'] for event in events if event['type'] == 'final_assistant_answer') == COACH
         assert spoken == [REPLY]
+
+
+def test_fresh_session_and_explicit_clear_allow_face_start_without_speech_finalize(voice_client, monkeypatch):
+    client, _ = voice_client
+    transcriber = DeepgramTranscriptionProcessor()
+    finalize = Mock()
+    transcriber._socket = SimpleNamespace(send_finalize=finalize)
+    transcriber._accumulated_parts = ['previous session']
+    monkeypatch.setattr(server.app.state.AudioInputProcessor, 'abort_generation', transcriber.abort_generation)
+
+    class Session:
+        session = {'id':'view', 'url':'http://localhost:7860', 'token':'viewer-only'}
+
+        async def __aenter__(self):
+            return self
+
+        async def interrupt(self):
+            pass
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(server, 'AvatarBridge', lambda messages: AvatarBridge(messages, factory=Session))
+    with client.websocket_connect('/ws') as socket:
+        socket.send_json({'type':'avatar_start'})
+        assert socket.receive_json()['type'] == 'avatar_status'
+        assert socket.receive_json()['type'] == 'avatar_session'
+        assert transcriber._accumulated_parts == []
+        transcriber._accumulated_parts = ['discard this utterance']
+        socket.send_json({'type':'clear_history'})
+        socket.send_json({'type':'user_text','text':COACH['original_sentence']})
+        while socket.receive_json()['type'] != 'tts_end':
+            pass
+        assert transcriber._accumulated_parts == []
+        finalize.assert_not_called()
 
 
 def test_same_coaching_audio_reaches_avatar_without_duplicate_native_audio(voice_client, monkeypatch):

@@ -1003,6 +1003,8 @@ async def run_voice_session(ws):
     # Fresh Session Isolation: Unconditionally wipe prior session history and topics
     try:
         await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
+        if hasattr(app.state.AudioInputProcessor, "abort_generation"):
+            await asyncio.to_thread(app.state.AudioInputProcessor.abort_generation)
         if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
             app.state.SpeechPipelineManager.llm._topic_index = 0
         logger.info("🖥️🧹 Clean session started: History and pipeline state reset.")

@@ -111,6 +111,30 @@ async def test_close_cancels_in_progress_gpu_initialization():
 
 
 @pytest.mark.asyncio
+async def test_avatar_start_timeout_releases_candidate_and_allows_retry(monkeypatch):
+    monkeypatch.setenv('AVATAR_START_TIMEOUT', '0.01')
+
+    class SlowSession(Session):
+        async def __aenter__(self):
+            await asyncio.Event().wait()
+
+    candidate = SlowSession()
+    messages = asyncio.Queue()
+    bridge = AvatarBridge(messages, factory=lambda: candidate)
+    await asyncio.wait_for(bridge.start(), 1)
+    assert bridge.session is None
+    candidate.close.assert_awaited_once()
+    emitted = [messages.get_nowait()['type'] for _ in range(messages.qsize())]
+    assert 'avatar_error' in emitted
+    assert 'avatar_session' not in emitted
+    replacement = Session()
+    bridge.factory = lambda: replacement
+    await bridge.start()
+    assert bridge.session is replacement
+    await bridge.close()
+
+
+@pytest.mark.asyncio
 async def test_backpressure_is_bounded_and_returns_chunk_to_voice_only_path():
     bridge, session, _ = await ready_bridge()
     assert not await bridge.route({"type": "tts_chunk", "content": "A" * 2_000_001})

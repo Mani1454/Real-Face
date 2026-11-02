@@ -57,7 +57,10 @@ class AvatarBridge:
                     portrait = ROOT / portrait
                 candidate = (client.avatar(avatar_id=avatar_id) if avatar_id
                              else client.avatar(str(portrait)))
-            await candidate.__aenter__()
+            await asyncio.wait_for(
+                candidate.__aenter__(),
+                timeout=float(os.getenv("AVATAR_START_TIMEOUT", "30")),
+            )
             self.session = candidate
             # Only the viewer descriptor is sent. Never expose publisher/API keys.
             self.emit("avatar_session", dict(candidate.session))

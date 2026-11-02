@@ -76,10 +76,55 @@ test('viewer readiness, interruption, and disconnect follow the session contract
   expect(messages.filter(x => x.type === 'avatar_interrupt')).toHaveLength(0);
   expect(await page.locator('#avatarVideo').evaluate(video => video.muted)).toBe(true);
   await expect.poll(() => messages.some(x => x.type === 'interrupt')).toBe(true);
-  expect(messages.filter(x => x.type === 'clear_history')).toHaveLength(1);
+  expect(messages.filter(x => x.type === 'clear_history')).toHaveLength(0);
   await page.locator('#avatarConnectBtn').click();
   await expect(page.locator('#avatarVideo')).toBeHidden();
   await expect.poll(() => messages.some(x => x.type === 'avatar_stop')).toBe(true);
+  await page.locator('#resetBtn').click();
+  await expect.poll(() => messages.filter(x => x.type === 'clear_history').length).toBe(1);
+});
+
+test('a stalled face connection times out, ignores late sessions, and can be retried', async ({page}) => {
+  await page.clock.install();
+  let channel, starts = 0;
+  const descriptor = {id:'test',url:'http://renderer.invalid',token:'viewer'};
+  await page.route('**/static/vendor/openspline/index.js', route => route.fulfill({
+    contentType:'application/javascript',body:fakePlayer,
+  }));
+  await page.routeWebSocket('**/ws', socket => {
+    channel = socket;
+    socket.onMessage(raw => {
+      if (JSON.parse(raw).type === 'avatar_start' && ++starts === 2) {
+        socket.send(JSON.stringify({type:'avatar_session',content:descriptor}));
+      }
+    });
+  });
+  await page.goto('/');
+  await page.locator('#avatarConnectBtn').click();
+  await expect.poll(() => starts).toBe(1);
+  await page.clock.fastForward(45001);
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Connect live face');
+  await expect(page.locator('#avatarStatus')).toContainText('took too long');
+  channel.send(JSON.stringify({type:'avatar_session',content:descriptor}));
+  await expect(page.locator('#avatarVideo')).toBeHidden();
+  await page.locator('#avatarConnectBtn').click();
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await page.clock.fastForward(45001);
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+});
+
+test('cancel and retry while the voice socket opens sends only one face start', async ({page}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    window.faceStarts = [];
+    const ready = new Promise(resolve => { window.releaseVoiceConnection = resolve; });
+    window.realFace.configure({connect:() => ready,send:data => window.faceStarts.push(data.type)});
+  });
+  await page.locator('#avatarConnectBtn').click();
+  await page.locator('#avatarConnectBtn').click();
+  await page.locator('#avatarConnectBtn').click();
+  await page.evaluate(() => window.releaseVoiceConnection());
+  await expect.poll(() => page.evaluate(() => window.faceStarts.filter(x => x === 'avatar_start').length)).toBe(1);
 });
 
 test('reachable voice server shows READY without reserving a conversation', async ({page}) => {

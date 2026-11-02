@@ -3,6 +3,7 @@ import asyncio
 import threading
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import httpx
 import numpy as np
@@ -11,6 +12,23 @@ import pytest
 from audio_in import AudioInputProcessor
 from transcribe import DeepgramTranscriptionProcessor
 import server
+
+
+def test_history_abort_clears_local_transcription_without_flushing_the_network():
+    processor = DeepgramTranscriptionProcessor()
+    finalize = Mock(side_effect=AssertionError('A reset must not touch the speech socket'))
+    processor._socket = SimpleNamespace(send_finalize=finalize)
+    processor._accumulated_parts = ['old speech']
+    processor.realtime_text = processor.final_transcription = 'old speech'
+    processor._last_final_time = 123
+    processor.abort_generation()
+    finalize.assert_not_called()
+    assert processor._accumulated_parts == []
+    assert processor.realtime_text is None
+    assert processor.final_transcription is None
+    assert processor._last_final_time == 0
+    processor.perform_final()
+    finalize.assert_called_once()
 
 
 @pytest.mark.asyncio
