@@ -18,3 +18,6 @@ scipy
 
 # Configuration
 python-dotenv
+
+# Avatar client only; the GPU renderer runs in its own environment/service.
+openspline==0.1.2

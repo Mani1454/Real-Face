@@ -1,0 +1,16 @@
+.git
+.venv
+.avatar-venv
+venv
+node_modules
+models
+runtime
+.avatar-runtime
+.env
+.enve
+.env.*
+!.env.example
+__pycache__
+.pytest_cache
+test-results
+playwright-report

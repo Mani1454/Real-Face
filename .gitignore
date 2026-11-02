@@ -1,4 +1,12 @@
 # Python
+.venv/
+.avatar-venv/
+venv/
+runtime/
+.avatar-runtime/
+node_modules/
+test-results/
+playwright-report/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -56,7 +64,6 @@ models/
 
 # Docker
 docker-compose.yml
-.dockerignore
 
 # SSL certificates
 *.pem

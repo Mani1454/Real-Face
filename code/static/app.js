@@ -47,6 +47,23 @@ let isRecording = false;
 let ignoreIncomingTTS = false;
 let serverPlayedAudio = false;
 let speechRec = null;
+let voiceReady = false;
+
+fetch('/api/config').then(r => r.json()).then(config => {
+  voiceReady = config.voice_ready;
+  const notice = document.getElementById('setupNotice');
+  if (!voiceReady) {
+    notice.hidden = false;
+    notice.textContent = 'Preview mode · Live conversation needs voice credentials configured on the server.';
+    startBtn.disabled = true;
+    chatInput.disabled = true;
+    sendBtn.disabled = true;
+  }
+  if (!config.avatar_enabled) document.getElementById('avatarConnectBtn').disabled = true;
+}).catch(() => {
+  document.getElementById('setupNotice').hidden = false;
+  document.getElementById('setupNotice').textContent = 'Unable to reach the server. Reload to try again.';
+});
 
 // --- ENGLISH TUTOR STATE & TURN-TAKING ---
 let isAssistantSpeaking = false;
@@ -175,7 +192,8 @@ function ensureSocket() {
   if (socket && socket.readyState === WebSocket.OPEN) {
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
+  if (socket && socket.readyState === WebSocket.CONNECTING) return socket.readyPromise;
+  const readyPromise = new Promise((resolve, reject) => {
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${wsProto}//${location.host}/ws`);
 
@@ -208,6 +226,9 @@ function ensureSocket() {
     };
 
     socket.onclose = () => {
+      reject(new Error('Connection closed'));
+      window.realFace?.disconnect(false);
+      cleanupAudio();
       setStatus("OFFLINE", "#666");
       if (isRecording) {
         stopUIState();
@@ -215,10 +236,13 @@ function ensureSocket() {
     };
 
     socket.onerror = (err) => {
+      reject(new Error('Unable to connect to the server'));
       console.warn("WebSocket status:", err);
       setStatus("OFFLINE", "#666");
     };
   });
+  socket.readyPromise = readyPromise;
+  return readyPromise;
 }
 
 // --- BROWSER SPEECH RECOGNITION (PATIENT TURN-TAKING & ECHO-PROTECTED) ---
@@ -328,6 +352,7 @@ function sendUserText(text) {
 
   // Reset states for the new turn
   serverPlayedAudio = false;
+  ignoreIncomingTTS = false;
   isTutorProcessing = true;
   if (speechRec) {
     try { speechRec.abort(); } catch (e) {}
@@ -381,13 +406,20 @@ if (sendBtn) {
 
 // --- CONNECTION LIFECYCLE ---
 async function startConnection() {
-  ensureSocket().catch(() => {});
+  if (!voiceReady) return;
+  try {
+    await ensureSocket();
+  } catch (err) {
+    updateLiveText('Unable to connect. Please try again.', 'OFFLINE');
+    return;
+  }
 
   isRecording = true;
   setStatus("ONLINE", "#00f0ff");
   updateLiveText("SwaySpeak Tutor Listening...", "SWAY TUTOR");
   orbContainer.classList.add("active");
   document.body.classList.add("session-active");
+  startBtn.textContent = 'End conversation';
 
   // Start raw PCM microphone streaming to backend Deepgram STT
   startAudioSystem().then(() => {
@@ -402,6 +434,10 @@ async function startConnection() {
     // If audio worklet / getUserMedia failed, fallback to browser speech recognition
     if (speechRec) {
       try { speechRec.start(); } catch (e) {}
+    } else {
+      cleanupAudio();
+      stopUIState();
+      updateLiveText('Microphone access is unavailable. You can still type a message.', 'MICROPHONE');
     }
   });
 }
@@ -428,6 +464,8 @@ function stopConnection() {
   }
   cleanupAudio();
   stopUIState();
+  window.realFace?.disconnect();
+  if (socket) socket.close();
 }
 
 function stopUIState() {
@@ -442,6 +480,7 @@ function stopUIState() {
   if (animationId) cancelAnimationFrame(animationId);
   setStatus("OFFLINE", "#666");
   updateLiveText("Initialize Sequence", "READY");
+  startBtn.textContent = 'Start conversation';
 }
 
 function setStatus(text, color) {
@@ -495,7 +534,8 @@ async function ensurePlaybackSystem() {
   return audioContext;
 }
 
-function stopAllTTSPlayback() {
+function stopAllTTSPlayback(interruptAvatar = true) {
+  if (interruptAvatar) window.realFace?.interrupt();
   if (ttsPlaybackEndTimer) {
     clearTimeout(ttsPlaybackEndTimer);
     ttsPlaybackEndTimer = null;
@@ -650,6 +690,7 @@ async function startAudioSystem() {
   } catch (err) {
     console.error(err);
     updateLiveText("Access Denied", "ERROR");
+    throw err;
   }
 }
 
@@ -695,12 +736,24 @@ function addLogEntry(role, content) {
   return div;
 }
 
-function handleJSONMessage({ type, content }) {
+function handleJSONMessage({ type, content, sample_rate }) {
+  if (window.realFace?.handleMessage({ type, content })) return;
+  if (type === 'voice_unavailable') {
+    updateLiveText(content, 'SETUP NEEDED');
+    return;
+  }
+  if (type === 'session_busy') {
+    const notice = document.getElementById('setupNotice');
+    notice.hidden = false;
+    notice.textContent = content;
+    return;
+  }
   if (type === "partial_user_request") {
     updateLiveText(content, "USER INPUT");
   }
   else if (type === "final_user_request") {
     serverPlayedAudio = false;
+    ignoreIncomingTTS = false;
     // Avoid duplicate log entry if we already displayed this text upon sending
     if (!lastUserEntryElement || lastUserText.toLowerCase().trim() !== content.toLowerCase().trim()) {
       lastUserText = content;
@@ -757,9 +810,9 @@ function handleJSONMessage({ type, content }) {
 
       // Spoken voice playback: Deepgram server TTS streams audio chunks directly to playTTSChunk.
       // We only fallback to window.speechSynthesis if server audio chunks never arrive after a safety grace period.
-      if (!serverPlayedAudio && !isTTSPlaying) {
+      if (!serverPlayedAudio && !isTTSPlaying && !window.realFace?.active) {
         setTimeout(() => {
-          if (!serverPlayedAudio && !isTTSPlaying && window.speechSynthesis) {
+          if (!serverPlayedAudio && !isTTSPlaying && !window.realFace?.active && window.speechSynthesis) {
             try {
               window.speechSynthesis.cancel();
               const utterance = new SpeechSynthesisUtterance(replyText);
@@ -801,16 +854,47 @@ function handleJSONMessage({ type, content }) {
     serverPlayedAudio = true;
     if (ignoreIncomingTTS) return;
     const int16 = base64ToInt16Array(content);
-    playTTSChunk(int16, 24000);
+    playTTSChunk(int16, sample_rate || 24000);
   }
   else if (type === "stop_tts") {
-    stopAllTTSPlayback();
+    stopAllTTSPlayback(false);
     isAssistantSpeaking = false;
     isTutorProcessing = false;
     ignoreIncomingTTS = true;
     orbContainer.classList.remove("speaking");
   }
 }
+
+window.realFace.configure({
+  connect: ensureSocket,
+  send: data => {
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(data));
+  },
+  onSpeaking: () => {
+    serverPlayedAudio = true;
+    isTTSPlaying = true;
+    isAssistantSpeaking = true;
+    isTutorProcessing = true;
+    orbContainer.classList.add('speaking');
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'tts_start'}));
+  },
+  onTurnEnd: onTTSPlaybackEnded,
+  onReady: () => stopAllTTSPlayback(false),
+  onFailure: () => {
+    onTTSPlaybackEnded();
+    isAssistantSpeaking = false;
+    isTutorProcessing = false;
+  },
+});
+
+document.getElementById('interruptBtn').onclick = () => {
+  stopAllTTSPlayback();
+  isAssistantSpeaking = false;
+  isTutorProcessing = false;
+  ignoreIncomingTTS = true;
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'interrupt'}));
+  updateLiveText('Go ahead, I’m listening.', 'YOUR TURN');
+};
 
 // --- SCI-FI VISUALIZER ---
 function drawVisualizer() {
@@ -875,12 +959,10 @@ function preloadWorkletScripts() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  ensureSocket().catch(() => {});
   setupSpeechRecognition();
   preloadWorkletScripts();
 });
 if (document.readyState !== "loading") {
-  ensureSocket().catch(() => {});
   setupSpeechRecognition();
   preloadWorkletScripts();
 }

@@ -72,6 +72,7 @@ from audio_in import AudioInputProcessor
 from speech_pipeline_manager import SpeechPipelineManager
 from colors import Colors
 from tutor_schema import EnglishTutorResponse, parse_and_validate_tutor_response
+from avatar_bridge import AvatarBridge
 
 LANGUAGE = "en"
 # TTS_FINAL_TIMEOUT = 0.5 # unsure if 1.0 is needed for stability
@@ -123,9 +124,16 @@ async def lifespan(app: FastAPI):
     """
     logger.info("🖥️▶️ Server starting up")
     # Ensure required API keys are present when using API-based engines/backends
-    if TTS_START_ENGINE == "deepgram" or STT_BACKEND == "deepgram":
-        if not os.getenv("DEEPGRAM_API_KEY"):
-            raise RuntimeError("DEEPGRAM_API_KEY is not set. Add it to .enve/.env before starting the server.")
+    missing = []
+    if (TTS_START_ENGINE == "deepgram" or STT_BACKEND == "deepgram") and not os.getenv("DEEPGRAM_API_KEY"):
+        missing.append("DEEPGRAM_API_KEY")
+    if LLM_START_PROVIDER == "groq" and not os.getenv("GROQ_API_KEY"):
+        missing.append("GROQ_API_KEY")
+    app.state.missing_credentials = missing
+    if missing:
+        logger.warning("Voice is not configured; serving the interface and avatar preview only.")
+        yield
+        return
     if LLM_START_PROVIDER == "megallm" and not os.getenv("MEGALLM_API_KEY"):
         raise RuntimeError("MEGALLM_API_KEY is not set. Add it to .enve/.env before starting the server.")
 
@@ -140,11 +148,13 @@ async def lifespan(app: FastAPI):
         LANGUAGE,
     )
     app.state.Aborting = False # Keep this? Its usage isn't clear in the provided snippet. Minimizing changes.
+    app.state.voice_lock = asyncio.Lock()
 
     yield
 
     logger.info("🖥️⏹️ Server shutting down")
     app.state.AudioInputProcessor.shutdown()
+    app.state.SpeechPipelineManager.shutdown_event.set()
 
 # --------------------------------------------------------------------
 # FastAPI app instance
@@ -166,6 +176,14 @@ if not STATIC_DIR.exists():
     STATIC_DIR = Path("static")
 
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
+
+@app.get("/api/config")
+async def get_config():
+    return {
+        "voice_ready": not getattr(app.state, "missing_credentials", []),
+        "missing_credentials": getattr(app.state, "missing_credentials", []),
+        "avatar_enabled": os.getenv("AVATAR_ENABLED", "true").lower() == "true",
+    }
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -213,10 +231,23 @@ def parse_json_message(text: str) -> dict:
         A dictionary representing the parsed JSON, or an empty dictionary on error.
     """
     try:
-        return json.loads(text)
+        value = json.loads(text)
+        return value if isinstance(value, dict) else {}
     except json.JSONDecodeError:
         logger.warning("🖥️⚠️ Ignoring client message with invalid JSON")
         return {}
+
+
+async def handle_avatar_control(avatar, data):
+    kind = data.get("type")
+    if kind == "avatar_start":
+        avatar.request_start()
+    elif kind == "avatar_ready":
+        avatar.activate()
+    elif kind == "avatar_interrupt":
+        await avatar.interrupt()
+    elif kind in {"avatar_stop", "avatar_failed"}:
+        await avatar.disable()
 
 def format_timestamp_ns(timestamp_ns: int) -> str:
     """
@@ -310,6 +341,9 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 # Text-based message: parse JSON
                 data = parse_json_message(msg["text"])
                 msg_type = data.get("type")
+                if str(msg_type).startswith("avatar_"):
+                    await handle_avatar_control(callbacks.avatar, data)
+                    continue
                 logger.info(Colors.apply(f"🖥️📥 ←←Client: {data}").orange)
 
 
@@ -324,7 +358,13 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                     # Immediately unblock microphone so user's next utterance is captured without delay
                     app.state.AudioInputProcessor.interrupted = False
                     callbacks.interruption_time = 0
+                elif msg_type == "interrupt":
+                    callbacks.abort_generations("User requested their turn")
+                    await callbacks.avatar.interrupt()
+                    message_queue = callbacks.message_queue
+                    message_queue.put_nowait({"type": "stop_tts"})
                 elif msg_type == "clear_history":
+                    await callbacks.avatar.interrupt()
                     logger.info("🖥️ℹ️ Received clear_history from client.")
                     app.state.SpeechPipelineManager.reset()
                     if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
@@ -341,6 +381,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                     user_text = data.get("text") or data.get("content") or ""
                     logger.info(f"🖥️📥 Received text message from client: '{user_text}'")
                     if user_text:
+                        await callbacks.avatar.interrupt()
                         callbacks.generation_requested = False
                         callbacks.on_before_final(b"", user_text)
                         callbacks.on_final(user_text)
@@ -355,7 +396,7 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
     except Exception as e:
         logger.exception(f"🖥️💥 {Colors.apply('EXCEPTION').red} in process_incoming_data: {repr(e)}")
 
-async def send_text_messages(ws: WebSocket, message_queue: asyncio.Queue) -> None:
+async def send_text_messages(ws: WebSocket, message_queue: asyncio.Queue, avatar=None) -> None:
     """
     Continuously sends text messages from a queue to the client via WebSocket.
 
@@ -371,7 +412,9 @@ async def send_text_messages(ws: WebSocket, message_queue: asyncio.Queue) -> Non
             await asyncio.sleep(0.001) # Yield control
             data = await message_queue.get()
             msg_type = data.get("type")
-            if msg_type != "tts_chunk":
+            if avatar and await avatar.route(data):
+                continue
+            if msg_type not in {"tts_chunk", "avatar_session"}:
                 logger.info(Colors.apply(f"🖥️📤 →→Client: {data}").orange)
             await ws.send_json(data)
     except asyncio.CancelledError:
@@ -513,6 +556,7 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
                 if not final_expected or audio_final_finished:
                     logger.info("🖥️🏁 Sending of TTS chunks and 'user request/assistant answer' cycle finished.")
                     callbacks.send_final_assistant_answer() # Callbacks method
+                    message_queue.put_nowait({"type": "tts_end"})
 
                     assistant_answer = app.state.SpeechPipelineManager.running_generation.quick_answer + app.state.SpeechPipelineManager.running_generation.final_answer                    
                     app.state.SpeechPipelineManager.running_generation = None
@@ -532,7 +576,8 @@ async def send_tts_chunks(app: FastAPI, message_queue: asyncio.Queue, callbacks:
             base64_chunk = base64.b64encode(chunk).decode("utf-8")
             message_queue.put_nowait({
                 "type": "tts_chunk",
-                "content": base64_chunk
+                "content": base64_chunk,
+                "sample_rate": int(os.getenv("DEEPGRAM_TTS_SAMPLE_RATE", "24000")),
             })
             last_chunk_sent = time.time()
 
@@ -605,6 +650,7 @@ class TranscriptionCallbacks:
         self.reset_state() # Call reset to ensure consistency
 
         self.abort_request_event = threading.Event()
+        self.closed_event = threading.Event()
         self.abort_worker_thread = threading.Thread(target=self._abort_worker, name="AbortWorker", daemon=True)
         self.abort_worker_thread.start()
 
@@ -639,9 +685,9 @@ class TranscriptionCallbacks:
 
     def _abort_worker(self):
         """Background thread worker to check for abort conditions based on partial text."""
-        while True:
+        while not self.closed_event.is_set():
             was_set = self.abort_request_event.wait(timeout=0.1) # Check every 100ms
-            if was_set:
+            if was_set and not self.closed_event.is_set():
                 self.abort_request_event.clear()
                 # Only trigger abort check if the text actually changed
                 if self.last_abort_text != self.abort_text:
@@ -914,6 +960,41 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     logger.info("🖥️✅ Client connected via WebSocket.")
 
+    # A preview can exercise the actual renderer without speech-provider keys.
+    # No canned assistant response is substituted for a real conversation.
+    if getattr(app.state, "missing_credentials", []):
+        queue = asyncio.Queue()
+        avatar = AvatarBridge(queue)
+        sender = asyncio.create_task(send_text_messages(ws, queue, avatar))
+        try:
+            while True:
+                message = await ws.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message.get("text"):
+                    data = parse_json_message(message["text"])
+                    if str(data.get("type", "")).startswith("avatar_"):
+                        await handle_avatar_control(avatar, data)
+                    elif data.get("type") in {"user_text", "user_message", "text_input"}:
+                        queue.put_nowait({"type": "voice_unavailable", "content": "Configure the voice credentials in the server’s .env file to start a conversation."})
+        finally:
+            await avatar.close()
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+        return
+
+    # The inherited voice pipeline is shared. Reject a second voice session
+    # rather than allowing it to reset the first browser's history/callbacks.
+    if app.state.voice_lock.locked():
+        await ws.send_json({"type": "session_busy", "content": "Another conversation is active. Please try again when it ends."})
+        await ws.close(code=1013)
+        return
+    async with app.state.voice_lock:
+        await run_voice_session(ws)
+
+
+async def run_voice_session(ws):
+
     # Fresh Session Isolation: Unconditionally wipe prior session history and topics
     try:
         app.state.SpeechPipelineManager.reset()
@@ -928,6 +1009,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     # Set up callback manager - THIS NOW HOLDS THE CONNECTION-SPECIFIC STATE
     callbacks = TranscriptionCallbacks(app, message_queue)
+    callbacks.avatar = AvatarBridge(message_queue)
 
     # Assign callbacks to the AudioInputProcessor (global component)
     # These methods within callbacks will now operate on its *instance* state
@@ -949,7 +1031,7 @@ async def websocket_endpoint(ws: WebSocket):
     incoming_data_task = asyncio.create_task(process_incoming_data(ws, app, audio_chunks, callbacks))
     helper_tasks = [
         asyncio.create_task(app.state.AudioInputProcessor.process_chunk_queue(audio_chunks)),
-        asyncio.create_task(send_text_messages(ws, message_queue)),
+        asyncio.create_task(send_text_messages(ws, message_queue, callbacks.avatar)),
         asyncio.create_task(send_tts_chunks(app, message_queue, callbacks)),
     ]
 
@@ -964,6 +1046,9 @@ async def websocket_endpoint(ws: WebSocket):
             if not task.done():
                 task.cancel()
         await asyncio.gather(*helper_tasks, return_exceptions=True)
+        await callbacks.avatar.close()
+        callbacks.closed_event.set()
+        callbacks.abort_request_event.set()
         try:
             app.state.SpeechPipelineManager.reset()
             if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):

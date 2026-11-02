@@ -1,0 +1,10 @@
+# For a remote service, replace public_url with its browser-reachable HTTPS URL
+# and configure ice_servers with your STUN/TURN infrastructure.
+public_url: http://localhost:7860
+model_dir: models/avatar
+audio_model_dir: models/audio
+runtime_dir: .avatar-runtime
+workers:
+  - id: tutor-low-0
+    quality: low
+    devices: [0]
