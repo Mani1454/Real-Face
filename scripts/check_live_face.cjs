@@ -59,10 +59,20 @@ const fs = require('node:fs');
       const bytes=new Uint8Array(await new Blob(state.recorded,{type:'video/webm'}).arrayBuffer());
       let binary=''; for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
       const video=document.querySelector('#avatarVideo');
+      const reports=await window.realFace.connection.pc?.getStats();
+      const inbound=reports && [...reports.values()].find(item=>item.type==='inbound-rtp' && item.kind==='video');
+      const codec=inbound && reports.get(inbound.codecId);
+      const videoStats=inbound ? {
+        codec:codec?.mimeType,framesPerSecond:inbound.framesPerSecond,
+        framesDecoded:inbound.framesDecoded,framesDropped:inbound.framesDropped,
+        packetsLost:inbound.packetsLost,jitterMs:Math.round((inbound.jitter || 0)*1000),
+        meanJitterBufferMs:inbound.jitterBufferEmittedCount
+          ? Math.round(inbound.jitterBufferDelay/inbound.jitterBufferEmittedCount*1000):null,
+      }:null;
       return {frames:state.frames,maxPixelDifference:state.maxPixelDifference,width:video.videoWidth,height:video.videoHeight,
         firstSpeakingMs:Math.round(state.startedAt-state.submittedAt),
         playbackMs:Math.round(state.endedAt-state.startedAt),
-        generatedAudioMs:Math.round(state.generatedSamples/48),inferenceMs:state.inferenceMs,recording:btoa(binary)};
+        generatedAudioMs:Math.round(state.generatedSamples/48),inferenceMs:state.inferenceMs,videoStats,recording:btoa(binary)};
     });
     fs.writeFileSync('test-results/live-face-demo.webm',Buffer.from(result.recording,'base64'));
     delete result.recording;

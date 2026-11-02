@@ -895,6 +895,11 @@ class LLM:
             elif self.backend == "groq":
                 if self.client is None:
                     raise RuntimeError("Groq client not initialized (should have been caught by lazy_init).")
+                # Groq's Qwen3 instruct mode suits short spoken tutor replies.
+                # Keep the model and validated JSON contract, and allow callers
+                # or deployment configuration to select deeper reasoning.
+                if self.model.startswith("qwen/qwen3"):
+                    call_kwargs.setdefault("reasoning_effort", os.getenv("GROQ_REASONING_EFFORT", "none"))
                 if 'temperature' not in call_kwargs:
                     call_kwargs['temperature'] = 0.3
                 # Prevent tool-calls unless explicitly requested; Groq may raise if tool_choice missing

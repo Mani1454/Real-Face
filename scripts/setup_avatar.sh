@@ -12,6 +12,9 @@ fi
 uv pip install --python .avatar-venv/bin/python \
   'openspline-server[gpu] @ git+https://github.com/openspline/openspline.git@1e5f2b06e6c3dfc68e59ab9bfb3b30997d51caf9#subdirectory=packages/server' \
   --torch-backend cu126
+# Triton-only acceleration supported by the pinned renderer. Preserve its Torch
+# environment instead of resolving a different CUDA/Torch stack for this extra.
+uv pip install --python .avatar-venv/bin/python --no-deps 'sageattention==1.0.6'
 download_ready=false
 for download_attempt in 1 2 3; do
   if HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}" HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-45}" \

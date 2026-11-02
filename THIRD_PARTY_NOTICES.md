@@ -10,6 +10,10 @@ The application and Git history were copied at the owner's request from [Mani145
 
 The GPU service's vendored inference code retains its own Apache-2.0 license and third-party notices. Model weights have separate terms; review those when downloading or deploying the model. This repository does not redistribute model weights.
 
+## SageAttention
+
+The GPU setup installs [SageAttention](https://github.com/thu-ml/SageAttention), version 1.0.6, under its BSD-3-Clause license. It is a dependency rather than copied source. The local launcher uses the renderer's existing SageAttention integration; older environments without it retain the previous SDPA profile.
+
 ## Tutor portrait
 
 `code/static/tutor-portrait.png` was generated for this project using the imagegen skill. It represents a fictional person and is not sourced from a real person's photo. The image is the reference input for live animation and the disconnected-state preview.
