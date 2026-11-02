@@ -153,3 +153,13 @@ The full browser → staging voice app → real providers → local GPU → WebR
 Sources: [SageAttention installation and interfaces](https://github.com/thu-ml/SageAttention), [Groq Qwen 3.8 instruct/reasoning modes](https://console.groq.com/docs/model/qwen/qwen3.8-27b), and the pinned local OpenSpline/aiortc source. The GPU model remains the same Lite model; specific emotional-expression control and human-level realism were not added by these changes.
 
 The final backend suite passed 21 tests, including model-specific request settings and override behavior; all 7 browser regressions passed. Python compilation, shell syntax, and diff whitespace checks also passed. The local voice app was restarted on port 8000 with the updated dialogue setting, and the warmed renderer remains on port 7860.
+
+## Additional thirty percent in pixel count
+
+At the user's request, the accelerated default increased from 448×448 (200,704 pixels) to native 512×512 (262,144 pixels), a 30.61% increase. The lighter 448 profile remains selectable with `REAL_FACE_RENDER_SIZE=448`.
+
+At 512 resolution, 0.64-second blocks missed their generation deadline in 7 of 99 measured blocks, with a 0.586-second median and 0.687-second p95. The default now uses 33 model frames, including 9 motion-context frames, producing 24 new frames per 0.96-second block. Explicit frame-count overrides remain supported; the 448 profile keeps its 0.64-second blocks.
+
+The sustained 512/33/Sage benchmark measured a 0.775-second median, 0.878-second p95, and 30.7 generated fps. Two of 79 measured blocks exceeded the 0.96-second deadline; the maximum was 1.565 seconds. The strict all-blocks realtime flag therefore remained false. This profile improves resolution with more initial buffering and can still pause under heavy system load; average throughput is not a guarantee of uninterrupted playback. Initial compilation took 208 seconds. Model weights, portrait, speech model, and video encoding target are unchanged.
+
+The real browser/provider/GPU check confirmed native 512×512 output at 25 fps, zero dropped frames, zero lost packets, changing face video, and no page errors. Per-block inference was 548–629 ms in that run. The first speaking event arrived 4.298 seconds after text submission; playback/drain took 4.713 seconds for 4.600 seconds of generated audio. This single request is not a controlled latency comparison with earlier cloud calls. The warmed renderer remains available on port 7860, and the main app on port 8000 stayed healthy throughout the size change. Python compilation and diff whitespace checks passed.

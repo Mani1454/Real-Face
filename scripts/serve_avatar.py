@@ -16,8 +16,10 @@ def configure_runtime():
     )
     # Older installs keep the previous compatible profile until setup is rerun.
     accelerated = attention == 'sage'
-    os.environ.setdefault('REAL_FACE_RENDER_SIZE', '448' if accelerated else '384')
-    os.environ.setdefault('REAL_FACE_FRAME_NUM', '25' if accelerated else '33')
+    os.environ.setdefault('REAL_FACE_RENDER_SIZE', '512' if accelerated else '384')
+    size = int(os.environ['REAL_FACE_RENDER_SIZE'])
+    # Full resolution needs more render time; longer blocks retain playback margin.
+    os.environ.setdefault('REAL_FACE_FRAME_NUM', '25' if accelerated and size < 512 else '33')
     os.environ.setdefault('OPENSPLINE_COMPILE', '1')
     os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', str(ROOT / '.avatar-runtime/torch-compile'))
     from openspline_server import worker
