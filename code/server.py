@@ -34,9 +34,9 @@ try:
     env_specific = BASE_DIR / ".enve"
     env_default = BASE_DIR / ".env"
     if env_specific.exists():
-        load_dotenv(env_specific, override=True)
+        load_dotenv(env_specific, override=False)
     if env_default.exists():
-        load_dotenv(env_default, override=True)
+        load_dotenv(env_default, override=False)
 except Exception:
     pass
 
@@ -176,6 +176,10 @@ if not STATIC_DIR.exists():
     STATIC_DIR = Path("static")
 
 app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
+
+@app.get("/healthz")
+async def health():
+    return {"status": "ok", "voice_ready": not getattr(app.state, "missing_credentials", [])}
 
 @app.get("/api/config")
 async def get_config():

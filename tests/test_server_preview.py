@@ -12,6 +12,7 @@ def test_preview_loads_without_credentials_and_explains_unavailable_voice(monkey
         assert client.get('/static/tutor-portrait.png').status_code == 200
         assert client.get('/static/vendor/openspline/index.js').status_code == 200
         config = client.get('/api/config').json()
+        assert client.get('/healthz').json() == {'status': 'ok', 'voice_ready': False}
         assert config['voice_ready'] is False
         assert 'DEEPGRAM_API_KEY' in config['missing_credentials']
         with client.websocket_connect('/ws') as socket:

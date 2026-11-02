@@ -1,8 +1,11 @@
 services:
   - type: web
-    name: swayspeak
+    name: real-face
     runtime: docker
     plan: free
+    repo: https://github.com/Mani1454/Real-Face
+    branch: main
+    healthCheckPath: /healthz
     envVars:
       - key: DEEPGRAM_API_KEY
         sync: false
@@ -11,7 +14,7 @@ services:
       - key: LLM_PROVIDER
         value: groq
       - key: LLM_MODEL
-        value: groq/compound-mini
+        value: qwen/qwen3.8-27b
       - key: STT_BACKEND
         value: deepgram
       - key: TTS_ENGINE
@@ -24,3 +27,12 @@ services:
         value: "0.82"
       - key: DEEPGRAM_TTS_SAMPLE_RATE
         value: "24000"
+      - key: AVATAR_ENABLED
+        value: "true"
+      - key: AVATAR_QUALITY
+        value: low
+      - key: AVATAR_PORTRAIT
+        value: code/static/tutor-portrait.png
+      # Add OPENSPLINE_API_KEY in Render for Cloud rendering. The app's default
+      # without that key is a local renderer, unavailable inside a CPU container.
+      # For a separate GPU service, set its HTTPS address as OPENSPLINE_URL.

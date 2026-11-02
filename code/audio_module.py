@@ -14,9 +14,9 @@ try:
     env_specific = BASE_DIR / ".enve"
     env_default = BASE_DIR / ".env"
     if env_specific.exists():
-        load_dotenv(env_specific, override=True)
+        load_dotenv(env_specific, override=False)
     if env_default.exists():
-        load_dotenv(env_default, override=True)
+        load_dotenv(env_default, override=False)
 except Exception:
     pass
 

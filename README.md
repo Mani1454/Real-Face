@@ -25,6 +25,8 @@ For live conversation, set `DEEPGRAM_API_KEY` and `GROQ_API_KEY` in the local `.
 
 ## Enable the live face
 
+For cloud hosting, use the [Render deployment guide](docs/deployment.md). The repository includes a Blueprint for `real-face`, a health check, and secret placeholders.
+
 ### Local NVIDIA GPU
 
 FFmpeg and an NVIDIA driver compatible with CUDA 12.6 are required. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first. The setup creates an isolated environment and downloads model weights; allow several GB of disk space and time for first startup. This configuration selects the single-GPU Low model.
