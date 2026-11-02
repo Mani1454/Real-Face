@@ -232,12 +232,10 @@ class AudioInputProcessor:
                     continue # Skip empty chunks
 
                 # Feed audio only if not interrupted and transcriber should be running
-                if not self.interrupted:
-                    # Check failure flag again, as it might have been set between queue.get and here
-                     if not self._transcription_failed:
-                        # Feed audio to the underlying processor
-                        self.transcriber.feed_audio(processed.tobytes(), audio_data)
-                     # No 'else' needed here because the checks at the start of the loop handle termination
+                if not self.interrupted and not self._transcription_failed:
+                    # The SDK writes to a synchronous network socket. A stalled
+                    # speech connection must not stop HTTP or browser WebSockets.
+                    await asyncio.to_thread(self.transcriber.feed_audio, processed.tobytes(), audio_data)
 
             except asyncio.CancelledError:
                 logger.info("👂🚫 Audio processing task cancelled.")

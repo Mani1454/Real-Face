@@ -370,11 +370,11 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                 elif msg_type == "clear_history":
                     await callbacks.avatar.interrupt()
                     logger.info("🖥️ℹ️ Received clear_history from client.")
-                    app.state.SpeechPipelineManager.reset()
+                    await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
                     if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
                         app.state.SpeechPipelineManager.llm._topic_index = 0
                     if hasattr(app.state, "AudioInputProcessor") and hasattr(app.state.AudioInputProcessor, "abort_generation"):
-                        app.state.AudioInputProcessor.abort_generation()
+                        await asyncio.to_thread(app.state.AudioInputProcessor.abort_generation)
                     logger.info("🖥️🧹 History and topics reset to initial state.")
                 elif msg_type == "client_audio_config":
                     client_sr = data.get("sample_rate")
@@ -683,8 +683,8 @@ class TranscriptionCallbacks:
         self.generation_requested = False
         self.last_tutor_response = None
 
-        # Keep the abort call related to the audio processor/pipeline manager
-        self.app.state.AudioInputProcessor.abort_generation()
+        # Reset callback flags only. Finalizing a network transcription stream
+        # here could block the event loop at every completed tutor reply.
 
 
     def _abort_worker(self):
@@ -1001,7 +1001,7 @@ async def run_voice_session(ws):
 
     # Fresh Session Isolation: Unconditionally wipe prior session history and topics
     try:
-        app.state.SpeechPipelineManager.reset()
+        await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
         if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
             app.state.SpeechPipelineManager.llm._topic_index = 0
         logger.info("🖥️🧹 Clean session started: History and pipeline state reset.")
@@ -1054,7 +1054,7 @@ async def run_voice_session(ws):
         callbacks.closed_event.set()
         callbacks.abort_request_event.set()
         try:
-            app.state.SpeechPipelineManager.reset()
+            await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
             if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
                 app.state.SpeechPipelineManager.llm._topic_index = 0
             logger.info("🖥️🧹 Session ended: Pipeline state and history cleared.")

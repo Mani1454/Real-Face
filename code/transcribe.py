@@ -142,26 +142,26 @@ class DeepgramTranscriptionProcessor:
         self._socket = ctx.__enter__()
         self._start_keepalive()
 
-    def _close_socket(self):
+    def _close_socket(self, expected_socket=None):
         with self._socket_lock:
-            if self._socket:
-                self._stop_keepalive()
-                try:
-                    if hasattr(self._socket, "send_close_stream"):
-                        self._socket.send_close_stream()
-                except Exception:
-                    pass
-                try:
-                    self._socket._websocket.close()
-                except Exception:
-                    pass
-                self._socket = None
-            if self._socket_ctx:
-                try:
-                    self._socket_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
-                self._socket_ctx = None
+            if expected_socket is not None and self._socket is not expected_socket:
+                return
+            socket, ctx = self._socket, self._socket_ctx
+            self._socket = None
+            self._socket_ctx = None
+        # Never hold the state lock while doing I/O or joining another thread.
+        # Closing must be able to interrupt a blocked outgoing audio send.
+        self._stop_keepalive()
+        if socket:
+            try:
+                socket._websocket.close()
+            except Exception:
+                pass
+        if ctx:
+            try:
+                ctx.__exit__(None, None, None)
+            except Exception:
+                pass
 
     def _finalize_turn(self, final_text: str = "") -> None:
         """
@@ -235,8 +235,9 @@ class DeepgramTranscriptionProcessor:
                 self._ensure_connection()
             except Exception as e:
                 logger.error(f"👂💥 Failed to start Deepgram streaming session: {e}")
-                self.shutdown_performed = True
-                break
+                if self._stop_event.wait(timeout=1.0):
+                    break
+                continue
 
             try:
                 for message in self._socket:
@@ -271,20 +272,24 @@ class DeepgramTranscriptionProcessor:
         if self.shutdown_performed or self._stop_event.is_set():
             return
         try:
-            self._ensure_connection()
             with self._socket_lock:
-                if self._socket:
-                    self._socket.send_media(chunk)
+                socket = self._socket
+            # The receiving thread owns connect/reconnect. The SDK serializes
+            # sends internally; do not hold our lifecycle lock over network I/O.
+            if socket:
+                socket.send_media(chunk)
         except Exception as e:
             logger.error(f"👂💥 Failed to feed audio to Deepgram: {e}", exc_info=True)
+            self._close_socket(expected_socket=socket)
 
     def abort_generation(self) -> None:
         self._accumulated_parts.clear()
         self.realtime_text = None
         try:
             with self._socket_lock:
-                if self._socket and hasattr(self._socket, "send_finalize"):
-                    self._socket.send_finalize()
+                socket = self._socket
+            if socket and hasattr(socket, "send_finalize"):
+                socket.send_finalize()
         except Exception:
             pass
 
@@ -309,8 +314,9 @@ class DeepgramTranscriptionProcessor:
         while not self._keepalive_stop.is_set() and not self.shutdown_performed:
             try:
                 with self._socket_lock:
-                    if self._socket and hasattr(self._socket, "send_keep_alive"):
-                        self._socket.send_keep_alive()
+                    socket = self._socket
+                if socket and hasattr(socket, "send_keep_alive"):
+                    socket.send_keep_alive()
             except Exception:
                 pass
             self._keepalive_stop.wait(timeout=8.0)

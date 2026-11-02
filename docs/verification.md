@@ -93,3 +93,13 @@ The renderer started on `http://localhost:7860` with `backend: gpu`, quality `lo
 A WebM recording with the renderer's audio/video and screenshots were saved locally under `test-results/`. This confirms real neural animation and the integrated speech path; it is not a perceptual lip-sync benchmark or a guarantee of specific emotional expressions. Model weights and test media remain outside Git.
 
 For subsequent local startup, use `bash scripts/start_local.sh`. No OpenSpline Cloud key is needed for this local GPU configuration.
+
+## Offline-status recovery fix
+
+The local voice server was subsequently found listening on port 8000 while its HTTP health check timed out; the GPU service on port 7860 remained healthy. Code inspection identified synchronous speech-socket sends and transcription finalization in the asyncio event-loop path.
+
+Audio sends and pipeline resets now run outside that event loop. Speech lifecycle locks no longer cover network sends or socket closure, and temporary connection failures retry rather than permanently shutting down recognition. Failed senders cannot close a newer replacement connection. Callback state resets no longer finalize the transcription socket after every tutor reply.
+
+The browser checks server reachability at startup and every ten seconds. It shows `READY` before a session, `ONLINE` for an open conversation, and `OFFLINE` for an unreachable server. It also bounds connection attempts and recovers its status after the server returns without reserving a voice session merely to check availability.
+
+Validation includes 16 backend tests (with blocked-send, close/reconnect, and health-responsiveness regressions), 5 browser tests, ten consecutive successful health checks during a real GPU face session, another successful real speech-input → Groq → Deepgram audio check, and a real 512×512 GPU avatar response with no browser errors.

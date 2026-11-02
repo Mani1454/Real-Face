@@ -77,3 +77,30 @@ test('viewer readiness, interruption, and disconnect follow the session contract
   await expect(page.locator('#avatarVideo')).toBeHidden();
   await expect.poll(() => messages.some(x => x.type === 'avatar_stop')).toBe(true);
 });
+
+test('reachable voice server shows READY without reserving a conversation', async ({page}) => {
+  let connections = 0;
+  await page.route('**/api/config', route => route.fulfill({
+    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:true}),
+  }));
+  await page.routeWebSocket('**/ws', () => { connections++; });
+  await page.goto('/');
+  await expect(page.locator('#statusText')).toHaveText('READY');
+  await expect(page.locator('#startBtn')).toBeEnabled();
+  expect(connections).toBe(0);
+});
+
+test('status recovers automatically after a temporary server outage', async ({page}) => {
+  await page.clock.install();
+  let unavailable = true;
+  await page.route('**/api/config', route => unavailable ? route.abort() : route.fulfill({
+    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:true}),
+  }));
+  await page.goto('/');
+  await expect(page.locator('#statusText')).toHaveText('OFFLINE');
+  await expect(page.locator('#setupNotice')).toContainText('Retrying automatically');
+  unavailable = false;
+  await page.clock.fastForward(10001);
+  await expect(page.locator('#statusText')).toHaveText('READY');
+  await expect(page.locator('#setupNotice')).toBeHidden();
+});

@@ -50,6 +50,7 @@ For remote deployments, configure the renderer's `public_url` to an address the 
 
 ## Behavior
 
+- The connection badge shows **READY** when the server is reachable and no conversation is open, **ONLINE** during a connected session, and **OFFLINE** when the server cannot be reached. Reachability is checked automatically every ten seconds.
 - **Connect live face** starts a per-browser renderer session; the face connection can be tested without speech-provider keys.
 - When the face is connected, OpenSpline owns audio playback. Native PCM and browser speech synthesis are suppressed for that reply, preventing double speech.
 - Audio uses its configured sample rate instead of assuming 24 kHz.

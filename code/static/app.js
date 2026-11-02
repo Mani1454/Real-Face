@@ -48,21 +48,47 @@ let ignoreIncomingTTS = false;
 let serverPlayedAudio = false;
 let speechRec = null;
 let voiceReady = false;
+let serverReachable = false;
+let configRequestRunning = false;
 
-fetch('/api/config').then(r => r.json()).then(config => {
-  voiceReady = config.voice_ready;
+async function refreshServerStatus() {
+  if (configRequestRunning) return;
+  configRequestRunning = true;
   const notice = document.getElementById('setupNotice');
-  if (!voiceReady) {
+  try {
+    const response = await fetch('/api/config', {signal: AbortSignal.timeout(5000)});
+    if (!response.ok) throw new Error('Server unavailable');
+    const config = await response.json();
+    serverReachable = true;
+    voiceReady = config.voice_ready;
+    startBtn.disabled = !voiceReady;
+    chatInput.disabled = !voiceReady;
+    sendBtn.disabled = !voiceReady;
+    document.getElementById('avatarConnectBtn').disabled = !config.avatar_enabled;
+    if (!voiceReady) {
+      notice.hidden = false;
+      notice.dataset.reason = 'preview';
+      notice.textContent = 'Preview mode · Live conversation needs voice credentials configured on the server.';
+    } else if (['connection', 'preview'].includes(notice.dataset.reason)) {
+      notice.hidden = true;
+      delete notice.dataset.reason;
+    }
+    if (socket?.readyState === WebSocket.OPEN) setStatus('ONLINE', '#d5edaa');
+    else setStatus(voiceReady ? 'READY' : 'PREVIEW', '#d5edaa');
+  } catch {
+    serverReachable = false;
+    setStatus('OFFLINE', '#88928c');
     notice.hidden = false;
-    notice.textContent = 'Preview mode · Live conversation needs voice credentials configured on the server.';
-    startBtn.disabled = true;
-    chatInput.disabled = true;
-    sendBtn.disabled = true;
+    notice.dataset.reason = 'connection';
+    notice.textContent = 'The local server is unreachable. Retrying automatically…';
+  } finally {
+    configRequestRunning = false;
   }
-  if (!config.avatar_enabled) document.getElementById('avatarConnectBtn').disabled = true;
-}).catch(() => {
-  document.getElementById('setupNotice').hidden = false;
-  document.getElementById('setupNotice').textContent = 'Unable to reach the server. Reload to try again.';
+}
+refreshServerStatus();
+setInterval(refreshServerStatus, 10000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshServerStatus();
 });
 
 // --- ENGLISH TUTOR STATE & TURN-TAKING ---
@@ -194,10 +220,18 @@ function ensureSocket() {
   }
   if (socket && socket.readyState === WebSocket.CONNECTING) return socket.readyPromise;
   const readyPromise = new Promise((resolve, reject) => {
+    setStatus('CONNECTING', '#d5edaa');
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${wsProto}//${location.host}/ws`);
+    const connection = socket;
+    const connectionTimeout = setTimeout(() => {
+      connection.close();
+      reject(new Error('Connection timed out'));
+    }, 10000);
 
     socket.onopen = () => {
+      clearTimeout(connectionTimeout);
+      if (socket !== connection) return;
       setStatus("ONLINE", "#00f0ff");
       // Tell backend to clear history so opening another chat starts fresh with zero previous memory
       socket.send(JSON.stringify({ type: 'clear_history' }));
@@ -226,6 +260,8 @@ function ensureSocket() {
     };
 
     socket.onclose = () => {
+      clearTimeout(connectionTimeout);
+      if (socket !== connection) return;
       reject(new Error('Connection closed'));
       window.realFace?.disconnect(false);
       cleanupAudio();
@@ -233,9 +269,11 @@ function ensureSocket() {
       if (isRecording) {
         stopUIState();
       }
+      refreshServerStatus();
     };
 
     socket.onerror = (err) => {
+      clearTimeout(connectionTimeout);
       reject(new Error('Unable to connect to the server'));
       console.warn("WebSocket status:", err);
       setStatus("OFFLINE", "#666");
@@ -478,7 +516,7 @@ function stopUIState() {
   document.body.classList.remove("session-active");
   visualizerCanvas.style.opacity = "0";
   if (animationId) cancelAnimationFrame(animationId);
-  setStatus("OFFLINE", "#666");
+  setStatus(serverReachable ? (socket?.readyState === WebSocket.OPEN ? 'ONLINE' : 'READY') : 'OFFLINE', '#88928c');
   updateLiveText("Initialize Sequence", "READY");
   startBtn.textContent = 'Start conversation';
 }
