@@ -991,18 +991,10 @@ function drawVisualizer() {
 }
 
 // --- INITIALIZE ON LOAD ---
-function preloadWorkletScripts() {
-  try {
-    fetch('/static/pcmWorkletProcessor.js').catch(() => {});
-    fetch('/static/ttsPlaybackProcessor.js').catch(() => {});
-  } catch (e) {}
-}
-
-window.addEventListener("DOMContentLoaded", () => {
+// Microphone worklets load through audioWorklet.addModule when recording starts.
+// Unconsumed fetch preloads leave pending requests and prevent network idle.
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", setupSpeechRecognition, {once: true});
+} else {
   setupSpeechRecognition();
-  preloadWorkletScripts();
-});
-if (document.readyState !== "loading") {
-  setupSpeechRecognition();
-  preloadWorkletScripts();
 }

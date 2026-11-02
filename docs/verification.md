@@ -129,3 +129,9 @@ Interruption and turn completion were corrected independently of performance:
 - repeated speaking events no longer send duplicate `tts_start` messages.
 
 The live interruption check measured 0.2 ms to pause/mute and 23.2 ms to receive server-clear acknowledgement, with exactly one interruption request and zero duplicate avatar interruption requests. These are single local measurements, not a latency guarantee. The updated suite passed 17 backend tests and 7 Chrome browser tests.
+
+## Page startup remaining busy
+
+While investigating a page that remained loading, HTTP and normal browser `load` were fast, but waiting for `networkidle` timed out. Request tracing identified two startup worklet fetches whose response bodies were never consumed. Both remained pending after the page rendered. They were unnecessary: microphone recording already loads its processor with `audioWorklet.addModule`, and playback uses native Web Audio buffers.
+
+Removed these preloads and added a browser regression that requires startup to reach network idle and a control to update the page. The running app then reached network idle in 571 ms with zero pending requests and no page errors. All 7 browser tests passed. A real provider/GPU conversation also passed with 384×384 changing video and a tutor reply; first speaking took 4.119 seconds in that run. A separate check using Chrome's synthetic microphone confirmed that Start conversation loads the microphone worklet on demand and changes to End conversation without page errors. Direct inspection of the user's existing in-app tab was unavailable because its browser automation service module was missing, so these observations were made in fresh Chrome sessions.

@@ -88,9 +88,11 @@ test('reachable voice server shows READY without reserving a conversation', asyn
     contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:true}),
   }));
   await page.routeWebSocket('**/ws', () => { connections++; });
-  await page.goto('/');
+  await page.goto('/', {waitUntil:'networkidle', timeout:5000});
   await expect(page.locator('#statusText')).toHaveText('READY');
   await expect(page.locator('#startBtn')).toBeEnabled();
+  await page.locator('#interruptBtn').click();
+  await expect(page.locator('#liveText')).toHaveText('Go ahead, I’m listening.');
   expect(connections).toBe(0);
 });
 
