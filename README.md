@@ -38,6 +38,10 @@ bash scripts/start_avatar.sh
 
 Keep this service running in another terminal. The app defaults to `OPENSPLINE_URL=http://localhost:7860`. In the app, choose **Connect live face**, allow sound/video playback if prompted, then **Start conversation**.
 
+After first-time setup, `bash scripts/start_local.sh` starts the GPU renderer and voice app together, waits for renderer readiness, and reuses healthy services that are already running. Keep its terminal open. Startup logs are in the ignored `.avatar-runtime/` directory. Interrupted model downloads resume automatically when you rerun setup.
+
+The local GPU flow has been exercised end to end with real Groq/Deepgram speech and generated 512×512 face video. To repeat that optional check (which uses live provider calls), close other conversations and run `node scripts/check_live_face.cjs`. It saves a short video and screenshots under the ignored `test-results/` directory.
+
 ### OpenSpline Cloud
 
 Instead of a local service, set `OPENSPLINE_API_KEY` in `.env` and **remove `OPENSPLINE_URL`** so the SDK selects Cloud. Set `AVATAR_ID` for a saved Cloud avatar, or leave it unset to use the included portrait. Never put the Cloud key into browser JavaScript.

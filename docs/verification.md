@@ -13,7 +13,7 @@ Checked November 2, 2026, without live speech-provider or paid avatar credential
 | Dependency consistency | Checked with `pip check` | Main voice/client environment |
 | Python/JavaScript/shell syntax | Passed | Python compileall, Node JavaScript syntax checks, bash syntax checks |
 | Real Deepgram/Groq conversation | Passed in subsequent live check | See live provider check below; initial build was tested without credentials |
-| Neural photorealistic inference and expression quality | Not tested | GPU dependencies installed; model-weight download stalled and was canceled. Partial downloads remain resumable and are ignored by Git |
+| Neural portrait inference with real tutor speech | Passed in subsequent local GPU check | Fully downloaded and checksummed model weights; actual `backend: gpu` service produced moving 512×512 video with a real tutor reply |
 
 The browser tests replace the player module in lifecycle-specific cases. The separate transport check uses the actual player and actual SDK against OpenSpline's explicitly static test backend. Neither should be described as a photorealistic inference benchmark.
 
@@ -73,4 +73,23 @@ The old example Llama model was unavailable to this account. The live Groq model
 - This exercises real STT → tutor generation → TTS and transport. It does not verify a person's microphone hardware, acoustic echo behavior, or neural face rendering.
 - The 12 backend tests and 3 Chrome browser tests passed again with test environments isolated from live credentials.
 
-Cloud deployment is prepared but not yet performed: Render account access is required. Hosted photorealistic animation additionally requires an OpenSpline Cloud key or a reachable GPU renderer.
+Cloud deployment is prepared but not yet performed. Hosted photorealistic animation requires an OpenSpline Cloud key or a browser-reachable GPU renderer.
+
+## Subsequent local GPU face check
+
+The interrupted download was resumed using standard HTTP transfer with Xet disabled. All required weights finished downloading, with pinned revisions recorded in `models/manifest.json`. SHA-256 checks passed for the main portrait model, video decoder, and both downloaded audio encoder formats.
+
+The renderer started on `http://localhost:7860` with `backend: gpu`, quality `low`, and one RTX 4090 Laptop GPU worker. It used approximately 7 GB VRAM after loading and about 8.8 GB during the observed session.
+
+`node scripts/check_live_face.cjs` connected the actual app and actual GPU renderer in Chrome, sent a real tutor request through Groq and Deepgram, and observed:
+
+- 512×512 decoded avatar video;
+- 19 sampled frames during speaking;
+- maximum mean RGB frame difference of `4.402587890625` on a 64×64 downsample, confirming that the output changed during speech;
+- the tutor reply `Hi there! What did you do at the park?`;
+- no browser page errors;
+- clean session release after disconnect, leaving the GPU worker ready and unoccupied.
+
+A WebM recording with the renderer's audio/video and screenshots were saved locally under `test-results/`. This confirms real neural animation and the integrated speech path; it is not a perceptual lip-sync benchmark or a guarantee of specific emotional expressions. Model weights and test media remain outside Git.
+
+For subsequent local startup, use `bash scripts/start_local.sh`. No OpenSpline Cloud key is needed for this local GPU configuration.
