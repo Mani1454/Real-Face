@@ -103,3 +103,29 @@ Audio sends and pipeline resets now run outside that event loop. Speech lifecycl
 The browser checks server reachability at startup and every ten seconds. It shows `READY` before a session, `ONLINE` for an open conversation, and `OFFLINE` for an unreachable server. It also bounds connection attempts and recovers its status after the server returns without reserving a voice session merely to check availability.
 
 Validation includes 16 backend tests (with blocked-send, close/reconnect, and health-responsiveness regressions), 5 browser tests, ten consecutive successful health checks during a real GPU face session, another successful real speech-input → Groq → Deepgram audio check, and a real 512×512 GPU avatar response with no browser errors.
+
+## Audio/video stutter and interruption timing
+
+The original uncompiled 512×512 path took approximately 1.7 seconds to produce a 0.96-second media block, causing gaps once queued media was exhausted. Compiling the same size reduced observed generation to approximately 1.28 seconds per block, still slower than playback.
+
+The local renderer now uses a project-owned adapter around the pinned OpenSpline worker to select 384×384 spatial inference parameters, with PyTorch compilation enabled. Upstream installed source files are unchanged. The launcher warms one generated block before accepting sessions and keeps the compilation cache in `.avatar-runtime/torch-compile`.
+
+An engine benchmark after first-use compilation measured:
+
+- block duration: 0.96 seconds;
+- steady median generation: 0.755 seconds;
+- steady p95 generation: 0.764 seconds;
+- generated throughput: 31.7 frames/second, above the 25 fps playback target;
+- first-use compilation/inference: about 134 seconds, excluded from steady timing and performed before serving users.
+
+The actual browser/provider path then produced 384×384 moving video with per-block inference times of 765, 727, and 719 ms. In that run, time from submitting text to the first speaking event was 5.803 seconds, including Groq, Deepgram, buffering, and rendering. Playback plus drain acknowledgement took 3.512 seconds for 2.880 seconds of generated speech. Cloud response time and transport are still material latency sources; engine throughput alone is not an end-to-end latency claim.
+
+Interruption and turn completion were corrected independently of performance:
+
+- the browser pauses/mutes immediately instead of waiting for the server;
+- a single user stop no longer causes three renderer interruption round trips;
+- stale speaking events stay muted after interruption until a new turn starts;
+- the early player generation-end event no longer reopens input while audio is still buffered; the publisher's playback-drain acknowledgement completes the turn;
+- repeated speaking events no longer send duplicate `tts_start` messages.
+
+The live interruption check measured 0.2 ms to pause/mute and 23.2 ms to receive server-clear acknowledgement, with exactly one interruption request and zero duplicate avatar interruption requests. These are single local measurements, not a latency guarantee. The updated suite passed 17 backend tests and 7 Chrome browser tests.

@@ -25,6 +25,7 @@ class AvatarBridge:
         self.queue = asyncio.Queue(maxsize=128)
         self.buffered_bytes = 0
         self.closed = False
+        self.turn_started = False
 
     def emit(self, kind, content=None):
         self.messages.put_nowait({"type": kind, "content": content})
@@ -82,10 +83,11 @@ class AvatarBridge:
     async def route(self, data):
         """Return True when avatar output replaces native browser PCM playback."""
         kind = data.get("type")
-        if kind == "stop_tts":
-            await self.interrupt()
         if not self.active or kind not in {"tts_chunk", "tts_end"}:
             return False
+        if kind == "tts_chunk" and not self.turn_started:
+            self.turn_started = True
+            self.emit("avatar_turn_start")
         size = len(data.get("content", "")) if kind == "tts_chunk" else 0
         if self.queue.full() or self.buffered_bytes + size > 2_000_000:
             await self.disable("The live face could not keep up. Continuing with voice only.")
@@ -103,6 +105,7 @@ class AvatarBridge:
                     if data["type"] == "tts_end":
                         # Drain completes after the viewer acknowledges playback.
                         await self.session.end_turn()
+                        self.turn_started = False
                         self.emit("avatar_turn_end")
                     else:
                         await self.session.wait_for_viewer(timeout=20)
@@ -127,6 +130,7 @@ class AvatarBridge:
         self.buffered_bytes = 0
 
     async def interrupt(self):
+        self.turn_started = False
         if self.worker and self.worker is not asyncio.current_task():
             self.worker.cancel()
             await asyncio.gather(self.worker, return_exceptions=True)
@@ -135,6 +139,8 @@ class AvatarBridge:
         if self.session:
             try:
                 await asyncio.wait_for(self.session.interrupt(), timeout=5)
+                if self.active and not self.closed:
+                    self.emit("avatar_interrupted")
             except Exception:
                 self.active = False
                 self.emit("avatar_error", "Live face disconnected. Reconnect it to continue with video.")

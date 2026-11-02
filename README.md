@@ -40,7 +40,9 @@ Keep this service running in another terminal. The app defaults to `OPENSPLINE_U
 
 After first-time setup, `bash scripts/start_local.sh` starts the GPU renderer and voice app together, waits for renderer readiness, and reuses healthy services that are already running. Keep its terminal open. Startup logs are in the ignored `.avatar-runtime/` directory. Interrupted model downloads resume automatically when you rerun setup.
 
-The local GPU flow has been exercised end to end with real Groq/Deepgram speech and generated 512×512 face video. To repeat that optional check (which uses live provider calls), close other conversations and run `node scripts/check_live_face.cjs`. It saves a short video and screenshots under the ignored `test-results/` directory.
+The local GPU flow has been exercised end to end with real Groq/Deepgram speech and generated face video. The local launcher defaults to compiled 384×384 rendering: the observed 512×512 path was slower than playback on this laptop, while the 384 path measured about 32 generated frames/second against a 25 fps playback target. First-time compilation is completed during server startup; subsequent launches reuse its ignored disk cache. `REAL_FACE_RENDER_SIZE=512 bash scripts/start_avatar.sh` selects full resolution on hardware that can keep up.
+
+To repeat the optional real-provider checks, close other conversations and run `node scripts/check_live_face.cjs` and `node scripts/check_interruption.cjs`. These use live provider calls. The face check saves video/screenshots under the ignored `test-results/` directory. `.avatar-venv/bin/python scripts/serve_avatar.py --benchmark` measures the local GPU engine without paid voice calls.
 
 ### OpenSpline Cloud
 
@@ -54,7 +56,7 @@ For remote deployments, configure the renderer's `public_url` to an address the 
 - **Connect live face** starts a per-browser renderer session; the face connection can be tested without speech-provider keys.
 - When the face is connected, OpenSpline owns audio playback. Native PCM and browser speech synthesis are suppressed for that reply, preventing double speech.
 - Audio uses its configured sample rate instead of assuming 24 kHz.
-- **Your turn** stops queued avatar/native playback and cancels speech generation while retaining conversation history.
+- **Your turn** immediately pauses/mutes browser playback and sends one cancellation request while retaining conversation history. Old speaking events remain muted until a new reply starts.
 - **Clear conversation** resets history and stops playback.
 - **End conversation** releases the microphone, browser socket, avatar stream, and renderer session.
 - If the renderer fails or falls behind, the UI reports it and future audio chunks use voice-only playback. Part of an in-progress reply can be lost during a renderer failure; already-submitted audio is not replayed automatically.

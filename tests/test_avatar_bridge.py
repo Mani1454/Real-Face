@@ -117,3 +117,26 @@ async def test_backpressure_is_bounded_and_returns_chunk_to_voice_only_path():
     assert not bridge.active
     assert bridge.buffered_bytes == 0
     await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_playback_end_waits_for_drain_and_stop_message_does_not_interrupt_twice():
+    bridge, session, messages = await ready_bridge()
+    drain = asyncio.Event()
+    session.end_turn.side_effect = drain.wait
+    await bridge.route({'type': 'tts_chunk', 'content': 'AAAA'})
+    await bridge.route({'type': 'tts_chunk', 'content': 'AAAA'})
+    await bridge.route({'type': 'tts_end'})
+    await asyncio.sleep(0)
+    before=[]
+    while not messages.empty():
+        before.append(messages.get_nowait()['type'])
+    assert before.count('avatar_turn_start') == 1
+    assert 'avatar_turn_end' not in before
+    drain.set()
+    await asyncio.wait_for(bridge.queue.join(), 1)
+    assert messages.get_nowait()['type'] == 'avatar_turn_end'
+    await bridge.interrupt()
+    assert not await bridge.route({'type': 'stop_tts'})
+    session.interrupt.assert_awaited_once()
+    await bridge.close()

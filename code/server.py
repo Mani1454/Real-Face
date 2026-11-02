@@ -385,7 +385,8 @@ async def process_incoming_data(ws: WebSocket, app: FastAPI, incoming_chunks: as
                     user_text = data.get("text") or data.get("content") or ""
                     logger.info(f"🖥️📥 Received text message from client: '{user_text}'")
                     if user_text:
-                        await callbacks.avatar.interrupt()
+                        if callbacks.avatar.turn_started:
+                            await callbacks.avatar.interrupt()
                         callbacks.generation_requested = False
                         callbacks.on_before_final(b"", user_text)
                         callbacks.on_final(user_text)

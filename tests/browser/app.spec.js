@@ -10,16 +10,19 @@ export class AvatarConnection extends EventTarget {
 }`;
 
 async function mockFace(page, messages) {
+  let channel;
   await page.route('**/static/vendor/openspline/index.js', route => route.fulfill({
     contentType: 'application/javascript', body: fakePlayer,
   }));
   await page.routeWebSocket('**/ws', socket => {
+    channel = socket;
     socket.onMessage(raw => {
       const data = JSON.parse(raw);
       messages.push(data);
       if (data.type === 'avatar_start') socket.send(JSON.stringify({type:'avatar_session',content:{id:'test',url:'http://renderer.invalid',token:'viewer'}}));
     });
   });
+  return data => channel.send(JSON.stringify(data));
 }
 
 test('credential-free preview loads assets, disables voice, and fits desktop/mobile', async ({page}) => {
@@ -70,7 +73,8 @@ test('viewer readiness, interruption, and disconnect follow the session contract
   await expect(page.locator('#avatarVideo')).toBeVisible();
   await expect.poll(() => messages.some(x => x.type === 'avatar_ready')).toBe(true);
   await page.locator('#interruptBtn').click();
-  await expect.poll(() => messages.some(x => x.type === 'avatar_interrupt')).toBe(true);
+  expect(messages.filter(x => x.type === 'avatar_interrupt')).toHaveLength(0);
+  expect(await page.locator('#avatarVideo').evaluate(video => video.muted)).toBe(true);
   await expect.poll(() => messages.some(x => x.type === 'interrupt')).toBe(true);
   expect(messages.filter(x => x.type === 'clear_history')).toHaveLength(1);
   await page.locator('#avatarConnectBtn').click();
@@ -103,4 +107,44 @@ test('status recovers automatically after a temporary server outage', async ({pa
   await page.clock.fastForward(10001);
   await expect(page.locator('#statusText')).toHaveText('READY');
   await expect(page.locator('#setupNotice')).toBeHidden();
+});
+
+test('generation completion does not unlock input before audio playback drains', async ({page}) => {
+  const messages=[];
+  const send=await mockFace(page,messages);
+  await page.goto('/');
+  await page.locator('#avatarConnectBtn').click();
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  send({type:'avatar_turn_start'});
+  await page.evaluate(()=>{
+    const connection=window.realFace.connection;
+    connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'}));
+    connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'}));
+    connection.dispatchEvent(new Event('turnend'));
+  });
+  await expect(page.locator('#orbContainer')).toHaveClass(/speaking/);
+  await expect.poll(()=>messages.filter(x=>x.type==='tts_start').length).toBe(1);
+  send({type:'avatar_turn_end'});
+  await expect(page.locator('#orbContainer')).not.toHaveClass(/speaking/);
+  await expect.poll(()=>messages.filter(x=>x.type==='tts_stop').length).toBe(1);
+});
+
+test('Your turn mutes immediately and ignores stale speaking events until a new turn', async ({page}) => {
+  const messages=[];
+  const send=await mockFace(page,messages);
+  await page.goto('/');
+  await page.locator('#avatarConnectBtn').click();
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  send({type:'avatar_turn_start'});
+  await page.evaluate(()=>window.realFace.connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'})));
+  await page.locator('#interruptBtn').click();
+  await page.evaluate(()=>window.realFace.connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'})));
+  expect(await page.locator('#avatarVideo').evaluate(video=>video.muted)).toBe(true);
+  await expect(page.locator('#orbContainer')).not.toHaveClass(/speaking/);
+  await expect.poll(()=>messages.filter(x=>x.type==='interrupt').length).toBe(1);
+  expect(messages.filter(x=>x.type==='avatar_interrupt')).toHaveLength(0);
+  send({type:'avatar_turn_start'});
+  await page.waitForFunction(()=>!window.realFace.interrupted);
+  await page.evaluate(()=>window.realFace.connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'})));
+  expect(await page.locator('#avatarVideo').evaluate(video=>video.muted)).toBe(false);
 });

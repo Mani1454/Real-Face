@@ -186,7 +186,8 @@ resetBtn.onclick = () => {
     clearTimeout(echoCooldownTimer);
     echoCooldownTimer = null;
   }
-  stopAllTTSPlayback();
+  stopAllTTSPlayback(false);
+  window.realFace?.interrupt(false);
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
@@ -926,7 +927,8 @@ window.realFace.configure({
 });
 
 document.getElementById('interruptBtn').onclick = () => {
-  stopAllTTSPlayback();
+  stopAllTTSPlayback(false);
+  window.realFace?.interrupt(false);
   isAssistantSpeaking = false;
   isTutorProcessing = false;
   ignoreIncomingTTS = true;

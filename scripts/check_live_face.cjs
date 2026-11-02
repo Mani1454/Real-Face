@@ -14,7 +14,7 @@ const fs = require('node:fs');
     if(!await page.evaluate(()=>window.realFace.active)) throw new Error('Another conversation is active. Close it before running this check.');
     await page.waitForFunction(()=>document.querySelector('#avatarVideo').readyState>=2,null,{timeout:120000});
     await page.evaluate(()=>{
-      const state=window.liveFaceCheck={started:false,ended:false,frames:0,maxPixelDifference:0};
+      const state=window.liveFaceCheck={started:false,ended:false,frames:0,maxPixelDifference:0,inferenceMs:[],generatedSamples:0};
       const video=document.querySelector('#avatarVideo');
       const canvas=document.createElement('canvas'); canvas.width=64; canvas.height=64;
       const context=canvas.getContext('2d',{willReadFrequently:true});
@@ -32,14 +32,21 @@ const fs = require('node:fs');
       },150);
       const start=window.realFace.options.onSpeaking;
       const end=window.realFace.options.onTurnEnd;
-      window.realFace.options.onSpeaking=()=>{state.started=true;start();};
-      window.realFace.options.onTurnEnd=()=>{if(state.started)state.ended=true;end();};
+      window.realFace.options.onSpeaking=()=>{state.started=true;state.startedAt=performance.now();start();};
+      window.realFace.options.onTurnEnd=()=>{if(state.started){state.ended=true;state.endedAt=performance.now();}end();};
+      window.realFace.connection.addEventListener('event',event=>{
+        if(event.detail?.type==='speaking') {
+          state.inferenceMs.push(event.detail.inference_ms);
+          state.generatedSamples=event.detail.generated_samples;
+        }
+      });
       state.recorded=[];
       state.recorder=new MediaRecorder(video.srcObject,{mimeType:'video/webm;codecs=vp8,opus'});
       state.recorder.ondataavailable=event=>{if(event.data.size)state.recorded.push(event.data);};
       state.recorder.start(250);
     });
     await page.locator('#chatInput').fill('Hello, I went to the park today.');
+    await page.evaluate(()=>{window.liveFaceCheck.submittedAt=performance.now();});
     await page.locator('#sendBtn').click();
     await page.waitForFunction(()=>window.liveFaceCheck.started,null,{timeout:180000});
     fs.mkdirSync('test-results',{recursive:true});
@@ -52,7 +59,10 @@ const fs = require('node:fs');
       const bytes=new Uint8Array(await new Blob(state.recorded,{type:'video/webm'}).arrayBuffer());
       let binary=''; for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
       const video=document.querySelector('#avatarVideo');
-      return {frames:state.frames,maxPixelDifference:state.maxPixelDifference,width:video.videoWidth,height:video.videoHeight,recording:btoa(binary)};
+      return {frames:state.frames,maxPixelDifference:state.maxPixelDifference,width:video.videoWidth,height:video.videoHeight,
+        firstSpeakingMs:Math.round(state.startedAt-state.submittedAt),
+        playbackMs:Math.round(state.endedAt-state.startedAt),
+        generatedAudioMs:Math.round(state.generatedSamples/48),inferenceMs:state.inferenceMs,recording:btoa(binary)};
     });
     fs.writeFileSync('test-results/live-face-demo.webm',Buffer.from(result.recording,'base64'));
     delete result.recording;

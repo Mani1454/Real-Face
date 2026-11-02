@@ -6,4 +6,4 @@ if [[ ! -x .avatar-venv/bin/openspline ]]; then
   echo 'Run bash scripts/setup_avatar.sh first.'
   exit 1
 fi
-exec .avatar-venv/bin/openspline serve --config avatar-service.yaml --host 127.0.0.1 --port 7860
+exec .avatar-venv/bin/python scripts/serve_avatar.py

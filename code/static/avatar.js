@@ -4,6 +4,9 @@ class RealFaceAvatar {
     this.active = false;
     this.connection = null;
     this.generation = 0;
+    this.speaking = false;
+    this.interrupted = false;
+    this.resumeTimer = null;
     this.options = {};
     this.video = document.getElementById('avatarVideo');
     this.status = document.getElementById('avatarStatus');
@@ -41,7 +44,18 @@ class RealFaceAvatar {
     if (type === 'avatar_session') void this.attach(content);
     else if (type === 'avatar_status') this.setStatus(content);
     else if (type === 'avatar_error') this.fail(content);
-    else if (type === 'avatar_turn_end') this.options.onTurnEnd?.();
+    else if (type === 'avatar_turn_start') {
+      this.interrupted = false;
+    } else if (type === 'avatar_interrupted') {
+      // Stop immediately on the click; only resume idle video after the server
+      // has cleared old media and the small RTP tail has had time to drain.
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = setTimeout(() => this.connection?.play().catch(() => {}), 180);
+    } else if (type === 'avatar_turn_end' && !this.interrupted) {
+      this.speaking = false;
+      this.setStatus('Listening · Take your time');
+      this.options.onTurnEnd?.();
+    }
     return true;
   }
 
@@ -64,6 +78,9 @@ class RealFaceAvatar {
           this.button.textContent = 'Disconnect face';
           this.button.dataset.connecting = 'false';
         } else if (event.detail === 'speaking') {
+          if (this.interrupted || this.speaking) return;
+          this.speaking = true;
+          this.video.play().catch(() => {});
           this.video.muted = false;
           this.setStatus('Your tutor is speaking');
           this.options.onSpeaking?.();
@@ -72,11 +89,8 @@ class RealFaceAvatar {
         }
       });
       connection.addEventListener('autoplayblocked', () => { this.playButton.hidden = false; });
-      connection.addEventListener('turnend', () => {
-        if (this.connection !== connection) return;
-        this.setStatus('Listening · Take your time');
-        this.options.onTurnEnd?.();
-      });
+      // The player's turnend means generation ended, not that audio finished
+      // playing. Only avatar_turn_end from the publisher's drain unlocks input.
       connection.addEventListener('error', () => this.fail('The avatar stream failed. Voice-only mode is available.'));
       this.video.hidden = false;
       await connection.connect();
@@ -85,16 +99,23 @@ class RealFaceAvatar {
     }
   }
 
-  interrupt() {
+  interrupt(notify = true) {
     if (!this.connection) return;
+    clearTimeout(this.resumeTimer);
+    this.interrupted = true;
+    this.speaking = false;
     this.video.muted = true;
-    this.options.send({type: 'avatar_interrupt'});
+    this.video.pause();
+    if (notify) this.options.send({type: 'avatar_interrupt'});
     this.setStatus('Listening · Take your time');
   }
 
   disconnect(notify = true) {
+    clearTimeout(this.resumeTimer);
     ++this.generation;
     this.active = false;
+    this.speaking = false;
+    this.interrupted = false;
     const previous = this.connection;
     this.connection = null;
     previous?.close();
