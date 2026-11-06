@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def avatar_start_timeout():
+    return float(os.getenv("AVATAR_START_TIMEOUT", "30"))
+
+
 class AvatarBridge:
     def __init__(self, messages, *, factory=None):
         self.messages = messages
@@ -26,6 +30,7 @@ class AvatarBridge:
         self.buffered_bytes = 0
         self.closed = False
         self.turn_started = False
+        self.audio_window = 1
 
     def emit(self, kind, content=None):
         self.messages.put_nowait({"type": kind, "content": content})
@@ -51,6 +56,9 @@ class AvatarBridge:
                     timeout=float(os.getenv("AVATAR_TIMEOUT", "180")),
                     viewer_timeout=20,
                 )
+                # Cloud ACKs cross the internet. Eight <=100 ms packets can be
+                # outstanding while retaining the SDK's bounded backpressure.
+                self.audio_window = 8 if client.config.api_key else 1
                 avatar_id = os.getenv("AVATAR_ID")
                 portrait = Path(os.getenv("AVATAR_PORTRAIT", "code/static/tutor-portrait.png"))
                 if not portrait.is_absolute():
@@ -59,7 +67,7 @@ class AvatarBridge:
                              else client.avatar(str(portrait)))
             await asyncio.wait_for(
                 candidate.__aenter__(),
-                timeout=float(os.getenv("AVATAR_START_TIMEOUT", "30")),
+                timeout=avatar_start_timeout(),
             )
             self.session = candidate
             # Only the viewer descriptor is sent. Never expose publisher/API keys.
@@ -100,31 +108,72 @@ class AvatarBridge:
         return True
 
     async def _run(self):
+        pending = []
+
+        async def flush():
+            if not pending:
+                return
+            try:
+                await asyncio.gather(*pending)
+            finally:
+                # Join every send on failure/cancellation before releasing the
+                # session or allowing a new turn to use its epoch.
+                for task in pending:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                pending.clear()
+
         try:
             while True:
                 data, size = await self.queue.get()
                 self.buffered_bytes -= size
                 try:
                     if data["type"] == "tts_end":
+                        await flush()
                         # Drain completes after the viewer acknowledges playback.
                         await self.session.end_turn()
                         self.turn_started = False
                         self.emit("avatar_turn_end")
                     else:
                         await self.session.wait_for_viewer(timeout=20)
-                        await self.session.send_audio(
-                            base64.b64decode(data["content"], validate=True),
-                            sample_rate=data.get("sample_rate", 24000),
-                        )
+                        pcm = base64.b64decode(data["content"], validate=True)
+                        rate = data.get("sample_rate", 24000)
+                        if self.audio_window == 1:
+                            await self.session.send_audio(pcm, sample_rate=rate)
+                        else:
+                            # The pinned SDK splits at 100 ms and waits for
+                            # each ACK. Pre-split so concurrent calls cannot
+                            # interleave fragments from different PCM chunks.
+                            packet_size = rate * 2 // 10
+                            for offset in range(0, len(pcm), packet_size):
+                                pending.append(asyncio.create_task(self.session.send_audio(
+                                    pcm[offset:offset + packet_size], sample_rate=rate,
+                                )))
+                                if len(pending) >= self.audio_window:
+                                    await flush()
+                            # Never leave a short reply waiting for more audio.
+                            if self.queue.empty():
+                                await flush()
                 finally:
                     self.queue.task_done()
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("Avatar stream failed", exc_info=True)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+                pending.clear()
             # Do not replay audio already accepted by the renderer. New chunks
             # resume native playback after the browser closes the video stream.
             await self.disable("Live face disconnected. Continuing with voice only.")
+        finally:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     def _clear_queue(self):
         while not self.queue.empty():

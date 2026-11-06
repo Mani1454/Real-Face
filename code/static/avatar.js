@@ -8,6 +8,7 @@ class RealFaceAvatar {
     this.interrupted = false;
     this.resumeTimer = null;
     this.connectTimer = null;
+    this.connectTimeoutMs = 45000;
     this.options = {};
     this.video = document.getElementById('avatarVideo');
     this.status = document.getElementById('avatarStatus');
@@ -36,7 +37,7 @@ class RealFaceAvatar {
       if (generation === this.generation && !this.active) {
         this.fail('Connection took too long. Try connecting again.');
       }
-    }, 45000);
+    }, this.connectTimeoutMs);
     try {
       await this.options.connect();
       // The user may cancel while the WebSocket is connecting.

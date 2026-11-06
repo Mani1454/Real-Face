@@ -1,12 +1,8 @@
-# Deploy Real Face on Render
+# Deploy Speak with Sway on Render
 
-The Python app uses a long-lived FastAPI WebSocket for microphone PCM, transcripts, and reply audio. [Render web services support inbound and outbound WebSockets](https://render.com/docs/websocket). The repository's `render.yaml` deploys the Docker app as a separate `real-face` service; it does not modify the original SwaySpeak service.
+The Python app uses a long-lived FastAPI WebSocket for microphone PCM, transcripts, and reply audio. [Render web services support inbound and outbound WebSockets](https://render.com/docs/websocket). The repository's `render.yaml` deploys the Docker app as a separate `speak-with-sway` service; it does not modify the original SwaySpeak service.
 
-[Deploy this repository to Render](https://render.com/deploy?repo=https://github.com/Mani1454/Real-Face)
-
-## Hosting access
-
-For an agent-managed deployment, enable the Render connection in this chat. The agent can then create the service and set secrets in the selected account. A GitHub token authorizes repository access, not access to a Render account. At preparation time, no Render account connection was available and no cloud service had been created.
+[Deploy this repository to Render](https://render.com/deploy?repo=https://github.com/Mani1454/speak-with-sway)
 
 ## Runtime configuration
 
@@ -18,9 +14,11 @@ Set these values as **server-side Render environment variables**, never as GitHu
 | `GROQ_API_KEY` | Tutor replies | Your Groq key |
 | `LLM_MODEL` | Tutor replies | Blueprint uses `qwen/qwen3.8-27b`; verified available to the supplied account |
 | `OPENSPLINE_API_KEY` | Hosted live face with Cloud | Your OpenSpline Cloud key |
+| `OPENSPLINE_URL` | Current Cloud endpoint with the pinned SDK | `https://app.openspline.dev/api` |
+| `AVATAR_START_TIMEOUT` | Cloud initialization window | `180` seconds; browser uses this plus 15 seconds |
 | `AVATAR_ID` | Optional saved Cloud avatar | Saved avatar ID; leave unset to use the included portrait |
 
-For OpenSpline Cloud, leave `OPENSPLINE_URL` unset so the SDK selects its Cloud endpoint. Alternatively, set `OPENSPLINE_URL` to your own GPU service's HTTPS URL and configure that service's browser-reachable public URL and WebRTC/TURN networking. A CPU Render web service cannot run the neural avatar model. The Groq and Deepgram keys do not authorize OpenSpline Cloud.
+For OpenSpline Cloud, use the explicit API address above: the pinned SDK's default dashboard address redirects. Alternatively, set `OPENSPLINE_URL` to your own GPU service's HTTPS URL and configure that service's browser-reachable public URL and WebRTC/TURN networking. A CPU Render web service cannot run the neural avatar model. The Groq and Deepgram keys do not authorize OpenSpline Cloud.
 
 ## Verify after deployment
 

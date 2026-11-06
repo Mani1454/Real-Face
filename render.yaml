@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: real-face
+    name: speak-with-sway
     runtime: docker
     plan: free
-    repo: https://github.com/Mani1454/Real-Face
+    repo: https://github.com/Mani1454/speak-with-sway
     branch: main
     healthCheckPath: /healthz
     envVars:
@@ -33,6 +33,9 @@ services:
         value: low
       - key: AVATAR_PORTRAIT
         value: code/static/tutor-portrait.png
-      # Add OPENSPLINE_API_KEY in Render for Cloud rendering. The app's default
-      # without that key is a local renderer, unavailable inside a CPU container.
-      # For a separate GPU service, set its HTTPS address as OPENSPLINE_URL.
+      - key: OPENSPLINE_API_KEY
+        sync: false
+      - key: OPENSPLINE_URL
+        value: https://app.openspline.dev/api
+      - key: AVATAR_START_TIMEOUT
+        value: "180"

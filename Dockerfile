@@ -5,8 +5,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY code/ ./code/
 
 EXPOSE 10000
 
-CMD ["sh", "-c", "cd code && uvicorn server:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "cd code && exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-10000}"]

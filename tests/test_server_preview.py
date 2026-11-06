@@ -2,6 +2,15 @@ from fastapi.testclient import TestClient
 import server
 
 
+def test_cloud_startup_window_is_shared_with_browser_without_exposing_keys(monkeypatch):
+    monkeypatch.setenv('AVATAR_START_TIMEOUT', '180')
+    monkeypatch.setenv('OPENSPLINE_API_KEY', 'test-secret-not-for-browser')
+    with TestClient(server.app) as client:
+        response = client.get('/api/config')
+        assert response.json()['avatar_connect_timeout_ms'] == 195000
+        assert 'test-secret-not-for-browser' not in response.text
+
+
 def test_preview_loads_without_credentials_and_explains_unavailable_voice(monkeypatch):
     monkeypatch.delenv('DEEPGRAM_API_KEY', raising=False)
     monkeypatch.delenv('GROQ_API_KEY', raising=False)

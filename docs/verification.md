@@ -173,3 +173,15 @@ Transcription abort now clears only local transcript state; explicit remote fina
 All 24 backend and 9 browser tests passed. New regressions cover fresh-session and explicit resets that must not flush the speech network, initialization timeout/cleanup/retry, browser timeout recovery, cancellation/retry while the voice socket opens, and preservation of the explicit Clear conversation control. The existing blocked voice process was stopped and the patched app restarted on port 8000; the warm 512 renderer was kept running.
 
 The real `node scripts/check_live_face.cjs http://localhost:8002 --mic-first` check uses Chrome's synthetic microphone, starts recording before the face, presses Clear conversation, then connects and requests a tutor reply through the actual providers and GPU. The reset completed within the next logged hundredth of a second. It produced changing 512×512 video at 25 fps with zero dropped frames, zero lost packets, and no page errors; the first speaking event took 2.953 seconds. This verifies the microphone-first UI sequence rather than relying solely on the earlier face-first checks. The test app is separate from the user's active port-8000 conversation and is stopped after verification.
+
+## Windows Cloud speech continuity — November 6, 2026
+
+The user reported speech repeatedly cutting out. The app and Cloud session remained connected in the captured server logs. A browser baseline reproduced two audio buffer underruns and a 1,185 ms maximum gap between media arrivals.
+
+The pinned SDK waits for an acknowledgement after each <=100 ms PCM packet. Sending those packets serially makes throughput depend on internet round-trip time. The app now sends a bounded window of eight Cloud packets, splitting PCM before dispatch to preserve ordering. All packets are acknowledged before end-of-turn drain. Interruption and failures cancel and join outstanding sends before releasing or reusing the session. Local rendering retains its serial path.
+
+WebSocket cleanup is shielded from browser cancellation so an interrupted disconnect still releases the Cloud session. Regression coverage checks packet ordering, the eight-packet bound, pending-send cancellation, next-turn isolation, failure cleanup, and session release.
+
+A single live check after the change reported zero underruns, a 287 ms maximum media-arrival gap, and 5.12 seconds of generated speech played/drained in 5.579 seconds. The before and after replies differed, so these are observed continuity results rather than a controlled latency benchmark. Three subsequent replies in one Cloud session delivered 31.08 seconds of speech with zero underruns, no disconnects, and no browser errors; the longest reply contained 13.16 seconds of audio. First-speaking delays were 2.32–2.74 seconds. Network and provider performance can still vary.
+
+Validation: 28 backend tests and 10 browser tests passed; Python compilation, dependency consistency, and diff whitespace checks passed. Credentials and test media remain ignored by Git.

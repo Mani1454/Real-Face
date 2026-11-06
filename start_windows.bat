@@ -1,15 +1,21 @@
-@echo on
+@echo off
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   SWAYSPEAK - AI English Tutor Starting...
+echo   Speak with Sway - English conversation practice
 echo ============================================
 echo.
-echo Press any key to continue starting...
-pause >nul
+
 
 REM Ensure we're at repo root
-pushd %~dp0
+pushd "%~dp0"
+
+if exist ".venv\Scripts\python.exe" (
+  echo Open http://127.0.0.1:8000 in your browser.
+  ".venv\Scripts\python.exe" -X utf8 -m uvicorn server:app --app-dir code --host 127.0.0.1 --port 8000
+  if errorlevel 1 goto :error
+  goto :done
+)
 
 if not exist environment.yml (
   echo [ERROR] environment.yml not found in %~dp0

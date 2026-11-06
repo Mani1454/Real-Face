@@ -1,10 +1,10 @@
-# Real Face
+# Speak with Sway
 
 An English conversation tutor with a photorealistic, audio-driven face. Built from [Mani1454/swayspeak](https://github.com/Mani1454/swayspeak) at `ff583e2`, with [OpenSpline](https://github.com/openspline/openspline) as the avatar renderer.
 
-The tutor listens through your microphone, generates its reply, and streams the synthesized voice to the renderer. The avatar player delivers synchronized video and audio, while SwaySpeak keeps the transcript and grammar tips. Press **Your turn** to interrupt without clearing the conversation.
+The tutor listens through your microphone, generates its reply, and streams the synthesized voice to the renderer. The avatar player delivers synchronized video and audio, while the app keeps the transcript and grammar tips. Press **Your turn** to interrupt without clearing the conversation.
 
-![Real Face tutor portrait](code/static/tutor-portrait.png)
+![Sway, your English tutor](code/static/tutor-portrait.png)
 
 The included portrait is an AI-generated fictional character. **The still portrait is a preview, not a running avatar.** Live face animation needs a configured OpenSpline GPU service or Cloud account. Natural lip, head, and facial motion are model-generated; specific emotional expressions are not independently controllable in this integration.
 
@@ -19,13 +19,15 @@ cp .env.example .env
 .venv/bin/uvicorn server:app --app-dir code --host 127.0.0.1 --port 8000
 ```
 
+On a configured Windows PC, double-click `start_windows.bat` to launch the app using the project’s `.venv`.
+
 Open [localhost:8000](http://localhost:8000). Without voice credentials, the interface and avatar connection are available in **preview mode**, and conversation controls are disabled. No fake AI replies are generated.
 
 For live conversation, set `DEEPGRAM_API_KEY` and `GROQ_API_KEY` in the local `.env` file, then restart the app. Keys stay on the server. A hosted face service may charge for usage; the app never creates an account or adds credits automatically.
 
 ## Enable the live face
 
-For cloud hosting, use the [Render deployment guide](docs/deployment.md). The repository includes a Blueprint for `real-face`, a health check, and secret placeholders.
+For cloud hosting, use the [Render deployment guide](docs/deployment.md). The repository includes a Blueprint for `speak-with-sway`, a health check, and secret placeholders.
 
 ### Local NVIDIA GPU
 
@@ -52,7 +54,7 @@ To repeat the optional real-provider checks, close other conversations and run `
 
 ### OpenSpline Cloud
 
-Instead of a local service, set `OPENSPLINE_API_KEY` in `.env` and **remove `OPENSPLINE_URL`** so the SDK selects Cloud. Set `AVATAR_ID` for a saved Cloud avatar, or leave it unset to use the included portrait. Never put the Cloud key into browser JavaScript.
+Instead of a local service, set `OPENSPLINE_API_KEY` in `.env`, replace `OPENSPLINE_URL` with `https://app.openspline.dev/api`, and set `AVATAR_START_TIMEOUT=180`. The pinned SDK's default dashboard address now redirects; using the current API address avoids a failed session request. Cloud initialization can exceed the local 30-second deadline. The browser automatically waits for the configured server deadline plus 15 seconds. Set `AVATAR_ID` for a saved Cloud avatar, or leave it unset to use the included portrait. Never put the Cloud key into browser JavaScript.
 
 For remote deployments, configure the renderer's `public_url` to an address the browser can reach, use HTTPS, and configure WebRTC/TURN as needed. `localhost` refers to the viewer's own machine. A CPU Render container can host the voice app but cannot run the GPU model.
 

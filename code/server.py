@@ -11,6 +11,7 @@ from datetime import datetime
 from colors import Colors
 import uvicorn
 import asyncio
+import anyio
 import struct
 import json
 import time
@@ -72,7 +73,7 @@ from audio_in import AudioInputProcessor
 from speech_pipeline_manager import SpeechPipelineManager
 from colors import Colors
 from tutor_schema import EnglishTutorResponse, parse_and_validate_tutor_response
-from avatar_bridge import AvatarBridge
+from avatar_bridge import AvatarBridge, avatar_start_timeout
 
 LANGUAGE = "en"
 # TTS_FINAL_TIMEOUT = 0.5 # unsure if 1.0 is needed for stability
@@ -187,6 +188,7 @@ async def get_config():
         "voice_ready": not getattr(app.state, "missing_credentials", []),
         "missing_credentials": getattr(app.state, "missing_credentials", []),
         "avatar_enabled": os.getenv("AVATAR_ENABLED", "true").lower() == "true",
+        "avatar_connect_timeout_ms": int((avatar_start_timeout() + 15) * 1000),
     }
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -1048,22 +1050,24 @@ async def run_voice_session(ws):
     except Exception as e:
         logger.error(f"🖥️💥 {Colors.apply('ERROR').red} in WebSocket session: {repr(e)}")
     finally:
-        logger.info("🖥️🧹 Cleaning up WebSocket tasks...")
-        for task in helper_tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*helper_tasks, return_exceptions=True)
-        await callbacks.avatar.close()
-        callbacks.closed_event.set()
-        callbacks.abort_request_event.set()
-        try:
-            await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
-            if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
-                app.state.SpeechPipelineManager.llm._topic_index = 0
-            logger.info("🖥️🧹 Session ended: Pipeline state and history cleared.")
-        except Exception as reset_err:
-            logger.warning(f"🖥️⚠️ Notice resetting pipeline on disconnect: {reset_err}")
-        logger.info("🖥️❌ WebSocket session ended.")
+        # Finish releasing the Cloud slot even if the browser cancels its socket.
+        with anyio.CancelScope(shield=True):
+            logger.info("🖥️🧹 Cleaning up WebSocket tasks...")
+            for task in helper_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*helper_tasks, return_exceptions=True)
+            await callbacks.avatar.close()
+            callbacks.closed_event.set()
+            callbacks.abort_request_event.set()
+            try:
+                await asyncio.to_thread(app.state.SpeechPipelineManager.reset)
+                if hasattr(app.state.SpeechPipelineManager.llm, "_topic_index"):
+                    app.state.SpeechPipelineManager.llm._topic_index = 0
+                logger.info("🖥️🧹 Session ended: Pipeline state and history cleared.")
+            except Exception as reset_err:
+                logger.warning(f"🖥️⚠️ Notice resetting pipeline on disconnect: {reset_err}")
+            logger.info("🖥️❌ WebSocket session ended.")
 
 # --------------------------------------------------------------------
 # Entry point

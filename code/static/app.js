@@ -65,6 +65,9 @@ async function refreshServerStatus() {
     chatInput.disabled = !voiceReady;
     sendBtn.disabled = !voiceReady;
     document.getElementById('avatarConnectBtn').disabled = !config.avatar_enabled;
+    if (Number.isFinite(config.avatar_connect_timeout_ms) && config.avatar_connect_timeout_ms > 0) {
+      window.realFace.connectTimeoutMs = config.avatar_connect_timeout_ms;
+    }
     if (!voiceReady) {
       notice.hidden = false;
       notice.dataset.reason = 'preview';
@@ -169,7 +172,7 @@ if (toastCloseBtn) {
 
 // --- RESET LOGIC ---
 resetBtn.onclick = () => {
-  messagesList.innerHTML = `<div class="log-entry system"><span class="log-role">SYSTEM</span>SwaySpeak English Tutor ready. Context cleared.</div>`;
+  messagesList.innerHTML = `<div class="log-entry system"><span class="log-role">SYSTEM</span>Conversation cleared.</div>`;
   updateLiveText("System Ready", "SWAY TUTOR");
   lastUserEntryElement = null;
   lastUserText = "";
@@ -405,7 +408,7 @@ function sendUserText(text) {
       if (isRecording && speechRec) {
         try { speechRec.start(); } catch (e) {}
       }
-      updateLiveText("SwaySpeak Tutor Listening...", "SWAY TUTOR");
+      updateLiveText("Sway is listening…", "SWAY TUTOR");
     }
   }, 12000);
 
@@ -416,7 +419,7 @@ function sendUserText(text) {
   ensureSocket().then(() => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "user_text", text: clean }));
-      updateLiveText("SwaySpeak Analyzing...", "SWAY TUTOR");
+      updateLiveText("Sway is thinking…", "SWAY TUTOR");
     }
   });
 }
@@ -454,7 +457,7 @@ async function startConnection() {
 
   isRecording = true;
   setStatus("ONLINE", "#00f0ff");
-  updateLiveText("SwaySpeak Tutor Listening...", "SWAY TUTOR");
+  updateLiveText("Sway is listening…", "SWAY TUTOR");
   orbContainer.classList.add("active");
   document.body.classList.add("session-active");
   startBtn.textContent = 'End conversation';
@@ -685,7 +688,7 @@ function onTTSPlaybackEnded() {
     if (isRecording && speechRec) {
       try { speechRec.start(); } catch (e) {}
     }
-    updateLiveText("SwaySpeak Tutor Listening...", "SWAY TUTOR");
+    updateLiveText("Sway is listening…", "SWAY TUTOR");
   }, 600);
 }
 
@@ -874,7 +877,7 @@ function handleJSONMessage({ type, content, sample_rate }) {
                   if (isRecording && speechRec) {
                     try { speechRec.start(); } catch (e) {}
                   }
-                  updateLiveText("SwaySpeak Tutor Listening...", "SWAY TUTOR");
+                  updateLiveText("Sway is listening…", "SWAY TUTOR");
                 }, 600);
               };
               utterance.onend = handleSpeechEnd;

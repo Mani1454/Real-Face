@@ -164,3 +164,103 @@ async def test_playback_end_waits_for_drain_and_stop_message_does_not_interrupt_
     assert not await bridge.route({'type': 'stop_tts'})
     session.interrupt.assert_awaited_once()
     await bridge.close()
+
+@pytest.mark.asyncio
+async def test_cloud_audio_window_preserves_pcm_order_and_drains_after_all_acks():
+    bridge, session, _ = await ready_bridge()
+    bridge.audio_window = 8
+    release, filled = asyncio.Event(), asyncio.Event()
+    received = []
+    active = 0
+    peak = 0
+
+    async def send(pcm, sample_rate):
+        nonlocal active, peak
+        assert sample_rate == 24000
+        assert len(pcm) <= 4800
+        received.append(pcm)
+        active += 1
+        peak = max(peak, active)
+        if active == 8:
+            filled.set()
+        try:
+            await release.wait()
+        finally:
+            active -= 1
+
+    session.send_audio.side_effect = send
+    pcm = b''.join(bytes([i]) * 4800 for i in range(18))
+    await bridge.route({'type':'tts_chunk','content':base64.b64encode(pcm).decode()})
+    await bridge.route({'type':'tts_end'})
+    await asyncio.wait_for(filled.wait(), 1)
+    assert len(received) == 8
+    session.end_turn.assert_not_awaited()
+    release.set()
+    await asyncio.wait_for(bridge.queue.join(), 1)
+    assert b''.join(received) == pcm
+    assert peak == 8
+    session.end_turn.assert_awaited_once()
+    await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_cloud_interrupt_joins_pending_packets_before_accepting_next_turn():
+    bridge, session, _ = await ready_bridge()
+    bridge.audio_window = 8
+    release, filled = asyncio.Event(), asyncio.Event()
+    active = set()
+    received = []
+
+    async def send(pcm, sample_rate):
+        task = asyncio.current_task()
+        active.add(task)
+        received.append(pcm)
+        if len(active) == 8:
+            filled.set()
+        try:
+            await release.wait()
+        finally:
+            active.remove(task)
+
+    session.send_audio.side_effect = send
+    await bridge.route({'type':'tts_chunk','content':base64.b64encode(b'\x01\x00' * 48000).decode()})
+    await bridge.route({'type':'tts_end'})
+    await asyncio.wait_for(filled.wait(), 1)
+    await asyncio.wait_for(bridge.interrupt(), 1)
+    assert not active
+    assert len(received) == 8
+    session.end_turn.assert_not_awaited()
+    release.set()
+    await bridge.route({'type':'tts_chunk','content':base64.b64encode(b'new!').decode()})
+    await bridge.route({'type':'tts_end'})
+    await asyncio.wait_for(bridge.queue.join(), 1)
+    assert received[8:] == [b'new!']
+    session.end_turn.assert_awaited_once()
+    await bridge.close()
+
+
+@pytest.mark.asyncio
+async def test_cloud_packet_failure_cancels_other_sends_and_releases_session():
+    bridge, session, messages = await ready_bridge()
+    bridge.audio_window = 8
+    active = set()
+
+    async def send(pcm, sample_rate):
+        task = asyncio.current_task()
+        active.add(task)
+        try:
+            if pcm[0] == 2:
+                raise RuntimeError('connection lost')
+            await asyncio.Event().wait()
+        finally:
+            active.remove(task)
+
+    session.send_audio.side_effect = send
+    pcm = b''.join(bytes([i]) * 4800 for i in range(8))
+    await bridge.route({'type':'tts_chunk','content':base64.b64encode(pcm).decode()})
+    await asyncio.wait_for(bridge.worker, 1)
+    assert not active
+    assert not bridge.active
+    session.close.assert_awaited_once()
+    assert any(messages.get_nowait()['type'] == 'avatar_error' for _ in range(messages.qsize()))
+    await bridge.close()

@@ -86,6 +86,9 @@ test('viewer readiness, interruption, and disconnect follow the session contract
 
 test('a stalled face connection times out, ignores late sessions, and can be retried', async ({page}) => {
   await page.clock.install();
+  await page.route('**/api/config', route => route.fulfill({
+    contentType:'application/json', body:JSON.stringify({voice_ready:false,missing_credentials:[],avatar_enabled:true,avatar_connect_timeout_ms:45000}),
+  }));
   let channel, starts = 0;
   const descriptor = {id:'test',url:'http://renderer.invalid',token:'viewer'};
   await page.route('**/static/vendor/openspline/index.js', route => route.fulfill({
@@ -110,6 +113,33 @@ test('a stalled face connection times out, ignores late sessions, and can be ret
   await page.locator('#avatarConnectBtn').click();
   await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
   await page.clock.fastForward(45001);
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+});
+
+test('Cloud initialization can take longer than the local connection window', async ({page}) => {
+  await page.clock.install();
+  await page.route('**/api/config', route => route.fulfill({
+    contentType:'application/json', body:JSON.stringify({voice_ready:false,missing_credentials:[],avatar_enabled:true,avatar_connect_timeout_ms:195000}),
+  }));
+  await page.route('**/static/vendor/openspline/index.js', route => route.fulfill({
+    contentType:'application/javascript', body:fakePlayer,
+  }));
+  let channel;
+  const messages = [];
+  await page.routeWebSocket('**/ws', socket => {
+    channel = socket;
+    socket.onMessage(raw => messages.push(JSON.parse(raw)));
+  });
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => window.realFace.connectTimeoutMs)).toBe(195000);
+  await page.locator('#avatarConnectBtn').click();
+  await expect.poll(() => messages.some(x => x.type === 'avatar_start')).toBe(true);
+  await page.clock.fastForward(60000);
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Cancel connection');
+  expect(messages.some(x => x.type === 'avatar_failed')).toBe(false);
+  channel.send(JSON.stringify({type:'avatar_session',content:{id:'test',url:'http://renderer.invalid',token:'viewer'}}));
+  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await page.clock.fastForward(200000);
   await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
 });
 
