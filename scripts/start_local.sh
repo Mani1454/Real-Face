@@ -52,7 +52,7 @@ if [[ "$ready" != true ]]; then
   echo 'Renderer startup timed out. Check .avatar-runtime/local-renderer.log.'
   exit 1
 fi
-echo 'Ready: http://localhost:8000 — choose Connect live face, then Start conversation.'
+echo 'Ready: http://localhost:8000 — the face connects automatically. Choose Start conversation to talk.'
 if ((${#owned_pids[@]})); then
   echo 'Leave this terminal open. Ctrl+C stops only the services started here.'
   wait "${owned_pids[@]}"

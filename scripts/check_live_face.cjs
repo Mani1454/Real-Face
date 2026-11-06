@@ -18,7 +18,6 @@ const fs = require('node:fs');
       // Exercise the explicit reset path as well as fresh-session initialization.
       await page.locator('#resetBtn').click();
     }
-    await page.locator('#avatarConnectBtn').click();
     await page.waitForFunction(()=>window.realFace.active || document.querySelector('#setupNotice').textContent.includes('Another conversation'),null,{timeout:240000});
     if(!await page.evaluate(()=>window.realFace.active)) throw new Error('Another conversation is active. Close it before running this check.');
     await page.waitForFunction(()=>document.querySelector('#avatarVideo').readyState>=2,null,{timeout:120000});
@@ -90,7 +89,7 @@ const fs = require('node:fs');
     result.pageErrors=errors;
     result.passed=result.frames>1 && result.maxPixelDifference>0.1 && !!result.reply && errors.length===0;
     await page.screenshot({path:'test-results/live-face-app.png',fullPage:true});
-    await page.locator('#avatarConnectBtn').click();
+    await page.close();
     console.log(JSON.stringify(result));
     if(!result.passed)process.exitCode=1;
   } finally {await browser.close();}

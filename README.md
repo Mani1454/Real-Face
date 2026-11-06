@@ -38,7 +38,7 @@ bash scripts/setup_avatar.sh
 bash scripts/start_avatar.sh
 ```
 
-Keep this service running in another terminal. The app defaults to `OPENSPLINE_URL=http://localhost:7860`. In the app, choose **Connect live face**, allow sound/video playback if prompted, then **Start conversation**.
+Keep this service running in another terminal. The app defaults to `OPENSPLINE_URL=http://localhost:7860`. Open the app to connect the live face automatically. Choose **Start conversation** and allow microphone access to talk.
 
 After first-time setup, `bash scripts/start_local.sh` starts the GPU renderer and voice app together, waits for renderer readiness, and reuses healthy services that are already running. Keep its terminal open. Startup logs are in the ignored `.avatar-runtime/` directory. Interrupted model downloads resume automatically when you rerun setup.
 
@@ -61,7 +61,7 @@ For remote deployments, configure the renderer's `public_url` to an address the 
 ## Behavior
 
 - The connection badge shows **READY** when the server is reachable and no conversation is open, **ONLINE** during a connected session, and **OFFLINE** when the server cannot be reached. Reachability is checked automatically every ten seconds.
-- **Connect live face** starts a per-browser renderer session; the face connection can be tested without speech-provider keys.
+- Opening the page starts a per-browser renderer session. Microphone access starts only when you choose **Start conversation**. The server supports one active visitor at a time.
 - When the face is connected, OpenSpline owns audio playback. Native PCM and browser speech synthesis are suppressed for that reply, preventing double speech.
 - Audio uses its configured sample rate instead of assuming 24 kHz.
 - **Your turn** immediately pauses/mutes browser playback and sends one cancellation request while retaining conversation history. Old speaking events remain muted until a new reply starts.

@@ -28,6 +28,7 @@ async function mockFace(page, messages) {
 test('credential-free preview loads assets, disables voice, and fits desktop/mobile', async ({page}) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/api/config', route => route.fulfill({json:{voice_ready:false,avatar_enabled:false}}));
   await page.setViewportSize({width:1440,height:1080});
   await page.goto('/');
   await expect(page.getByRole('heading', {name:/Good conversations/})).toBeVisible();
@@ -49,6 +50,7 @@ test('credential-free preview loads assets, disables voice, and fits desktop/mob
 });
 
 test('renderer failure is visible and connection can be retried', async ({page}) => {
+  await page.clock.install();
   let starts = 0;
   await page.routeWebSocket('**/ws', socket => socket.onMessage(raw => {
     if (JSON.parse(raw).type === 'avatar_start') {
@@ -57,10 +59,9 @@ test('renderer failure is visible and connection can be retried', async ({page})
     }
   }));
   await page.goto('/');
-  await page.locator('#avatarConnectBtn').click();
   await expect(page.locator('#avatarStatus')).toContainText('Start the renderer');
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Connect live face');
-  await page.locator('#avatarConnectBtn').click();
+  await expect(page.getByRole('button', {name:'Connect live face'})).toHaveCount(0);
+  await page.clock.fastForward(40000);
   await expect.poll(() => starts).toBe(2);
 });
 
@@ -68,8 +69,7 @@ test('viewer readiness, interruption, and disconnect follow the session contract
   const messages = [];
   await mockFace(page, messages);
   await page.goto('/');
-  await page.locator('#avatarConnectBtn').click();
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
   await expect(page.locator('#avatarVideo')).toBeVisible();
   await expect.poll(() => messages.some(x => x.type === 'avatar_ready')).toBe(true);
   await page.locator('#interruptBtn').click();
@@ -77,11 +77,11 @@ test('viewer readiness, interruption, and disconnect follow the session contract
   expect(await page.locator('#avatarVideo').evaluate(video => video.muted)).toBe(true);
   await expect.poll(() => messages.some(x => x.type === 'interrupt')).toBe(true);
   expect(messages.filter(x => x.type === 'clear_history')).toHaveLength(0);
-  await page.locator('#avatarConnectBtn').click();
-  await expect(page.locator('#avatarVideo')).toBeHidden();
-  await expect.poll(() => messages.some(x => x.type === 'avatar_stop')).toBe(true);
   await page.locator('#resetBtn').click();
   await expect.poll(() => messages.filter(x => x.type === 'clear_history').length).toBe(1);
+  await page.evaluate(() => stopConnection());
+  await expect(page.locator('#avatarVideo')).toBeHidden();
+  await expect.poll(() => messages.some(x => x.type === 'avatar_stop')).toBe(true);
 });
 
 test('a stalled face connection times out, ignores late sessions, and can be retried', async ({page}) => {
@@ -103,17 +103,16 @@ test('a stalled face connection times out, ignores late sessions, and can be ret
     });
   });
   await page.goto('/');
-  await page.locator('#avatarConnectBtn').click();
   await expect.poll(() => starts).toBe(1);
   await page.clock.fastForward(45001);
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Connect live face');
-  await expect(page.locator('#avatarStatus')).toContainText('took too long');
+  await expect(page.getByRole('button', {name:'Connect live face'})).toHaveCount(0);
+  await expect(page.locator('#avatarStatus')).toContainText('taking longer');
   channel.send(JSON.stringify({type:'avatar_session',content:descriptor}));
   await expect(page.locator('#avatarVideo')).toBeHidden();
-  await page.locator('#avatarConnectBtn').click();
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await page.clock.fastForward(40000);
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
   await page.clock.fastForward(45001);
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
 });
 
 test('Cloud initialization can take longer than the local connection window', async ({page}) => {
@@ -132,35 +131,33 @@ test('Cloud initialization can take longer than the local connection window', as
   });
   await page.goto('/');
   await expect.poll(() => page.evaluate(() => window.realFace.connectTimeoutMs)).toBe(195000);
-  await page.locator('#avatarConnectBtn').click();
   await expect.poll(() => messages.some(x => x.type === 'avatar_start')).toBe(true);
   await page.clock.fastForward(60000);
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Cancel connection');
+  await expect.poll(() => page.evaluate(() => window.realFace.connecting)).toBe(true);
   expect(messages.some(x => x.type === 'avatar_failed')).toBe(false);
   channel.send(JSON.stringify({type:'avatar_session',content:{id:'test',url:'http://renderer.invalid',token:'viewer'}}));
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
   await page.clock.fastForward(200000);
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
 });
 
-test('cancel and retry while the voice socket opens sends only one face start', async ({page}) => {
+test('opening the page connects once and leaves the microphone off', async ({page}) => {
+  const messages = [];
+  await mockFace(page, messages);
   await page.goto('/');
-  await page.evaluate(() => {
-    window.faceStarts = [];
-    const ready = new Promise(resolve => { window.releaseVoiceConnection = resolve; });
-    window.realFace.configure({connect:() => ready,send:data => window.faceStarts.push(data.type)});
+  await expect(page.locator('#avatarStatus')).toContainText('Live face connected');
+  await page.evaluate(async () => {
+    await refreshServerStatus();
+    await refreshServerStatus();
   });
-  await page.locator('#avatarConnectBtn').click();
-  await page.locator('#avatarConnectBtn').click();
-  await page.locator('#avatarConnectBtn').click();
-  await page.evaluate(() => window.releaseVoiceConnection());
-  await expect.poll(() => page.evaluate(() => window.faceStarts.filter(x => x === 'avatar_start').length)).toBe(1);
+  expect(messages.filter(x => x.type === 'avatar_start')).toHaveLength(1);
+  expect(await page.evaluate(() => isRecording || !!mediaStream)).toBe(false);
 });
 
-test('reachable voice server shows READY without reserving a conversation', async ({page}) => {
+test('disabled avatar leaves voice ready without reserving a conversation', async ({page}) => {
   let connections = 0;
   await page.route('**/api/config', route => route.fulfill({
-    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:true}),
+    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:false}),
   }));
   await page.routeWebSocket('**/ws', () => { connections++; });
   await page.goto('/', {waitUntil:'networkidle', timeout:5000});
@@ -175,7 +172,7 @@ test('status recovers automatically after a temporary server outage', async ({pa
   await page.clock.install();
   let unavailable = true;
   await page.route('**/api/config', route => unavailable ? route.abort() : route.fulfill({
-    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:true}),
+    contentType:'application/json', body:JSON.stringify({voice_ready:true,missing_credentials:[],avatar_enabled:false}),
   }));
   await page.goto('/');
   await expect(page.locator('#statusText')).toHaveText('OFFLINE');
@@ -190,8 +187,7 @@ test('generation completion does not unlock input before audio playback drains',
   const messages=[];
   const send=await mockFace(page,messages);
   await page.goto('/');
-  await page.locator('#avatarConnectBtn').click();
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
   send({type:'avatar_turn_start'});
   await page.evaluate(()=>{
     const connection=window.realFace.connection;
@@ -210,8 +206,7 @@ test('Your turn mutes immediately and ignores stale speaking events until a new 
   const messages=[];
   const send=await mockFace(page,messages);
   await page.goto('/');
-  await page.locator('#avatarConnectBtn').click();
-  await expect(page.locator('#avatarConnectBtn')).toHaveText('Disconnect face');
+  await expect.poll(() => page.evaluate(() => window.realFace.active)).toBe(true);
   send({type:'avatar_turn_start'});
   await page.evaluate(()=>window.realFace.connection.dispatchEvent(new CustomEvent('statechange',{detail:'speaking'})));
   await page.locator('#interruptBtn').click();

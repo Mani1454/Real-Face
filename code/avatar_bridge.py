@@ -77,13 +77,17 @@ class AvatarBridge:
                 with contextlib.suppress(Exception):
                     await candidate.close()
             raise
-        except Exception:
+        except Exception as error:
             logger.warning("Avatar renderer could not initialize", exc_info=True)
             if candidate:
                 with contextlib.suppress(Exception):
                     await candidate.close()
             self.session = None
-            self.emit("avatar_error", "Live face unavailable. Start the OpenSpline service or configure Cloud access. Voice-only conversation is still available when voice credentials are configured.")
+            if "concurrent session limit" in str(error).lower() or getattr(error, "code", "") == "capacity":
+                message = "Sway's live face is busy. We'll retry automatically."
+            else:
+                message = "Live face unavailable. We'll retry automatically. You can still use voice chat when available."
+            self.emit("avatar_error", message)
 
     def activate(self):
         if self.session and not self.closed:

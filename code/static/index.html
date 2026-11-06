@@ -14,7 +14,7 @@
       <div class="sidebar-heading"><h2>Your conversation</h2><button class="icon-btn" id="closeSidebarBtn" aria-label="Close conversation history" style="display:none">✕</button></div>
       <p class="sidebar-note">A little practice. A little more confidence.</p>
       <div class="logs-container" id="messagesList" role="log" aria-live="polite">
-        <div class="log-entry system"><span class="log-role">WELCOME</span>Meet Sway, your English conversation partner. Connect the live face, then start a conversation.</div>
+        <div class="log-entry system"><span class="log-role">WELCOME</span>Meet Sway, your English conversation partner. Choose Start conversation when you’re ready to speak.</div>
       </div>
       <div class="sidebar-footer">Built on SwaySpeak <span>by Manish Kumar</span></div>
     </aside>
@@ -29,13 +29,13 @@
       <section class="tutor-card" aria-label="Your AI tutor Sway">
         <div class="avatar-stage core-wrapper" id="orbContainer">
           <img class="tutor-portrait" src="/static/tutor-portrait.png" alt="Sway, a fictional AI English tutor" width="1254" height="1254">
-          <video id="avatarVideo" playsinline aria-label="Live synchronized tutor video" hidden></video>
+          <video id="avatarVideo" autoplay muted playsinline aria-label="Live synchronized tutor video" hidden></video>
           <div class="avatar-topline"><span class="ai-badge">AI TUTOR</span><span class="private-note">Fictional character</span></div>
           <canvas id="visualizerCanvas" aria-hidden="true"></canvas>
           <div class="avatar-caption"><div><h2>Sway</h2><p>Your English conversation partner</p></div><span class="connection-light" aria-hidden="true"></span></div>
           <button class="play-button" id="avatarPlayBtn" hidden>Enable sound &amp; video</button>
         </div>
-        <div class="avatar-connection"><p id="avatarStatus" role="status" aria-live="polite">Portrait preview · Connect to see your tutor move</p><button id="avatarConnectBtn" class="text-button">Connect live face</button></div>
+        <div class="avatar-connection"><p id="avatarStatus" role="status" aria-live="polite">Connecting to Sway…</p></div>
       </section>
       <div class="live-transcript"><div class="transcript-label" id="transcriptLabel">READY WHEN YOU ARE</div><p class="transcript-text" id="liveText">What would you like to talk about?</p></div>
       <div class="session-controls"><button id="startBtn" class="primary-button">Start conversation</button><button id="interruptBtn" class="secondary-button" title="Stop the tutor so you can speak">Your turn</button><button id="resetBtn" class="icon-btn" aria-label="Clear conversation history" title="Clear conversation">↺</button></div>

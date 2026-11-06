@@ -50,6 +50,22 @@ let speechRec = null;
 let voiceReady = false;
 let serverReachable = false;
 let configRequestRunning = false;
+let faceEnabled = false;
+let faceWanted = true;
+let nextFaceAttempt = 0;
+
+function connectFaceIfNeeded() {
+  if (faceEnabled && faceWanted && !document.hidden && Date.now() >= nextFaceAttempt) {
+    void window.realFace.connect();
+  }
+}
+
+function prepareConversation() {
+  faceWanted = true;
+  nextFaceAttempt = 0;
+  connectFaceIfNeeded();
+  window.realFace.enableSound();
+}
 
 async function refreshServerStatus() {
   if (configRequestRunning) return;
@@ -64,10 +80,12 @@ async function refreshServerStatus() {
     startBtn.disabled = !voiceReady;
     chatInput.disabled = !voiceReady;
     sendBtn.disabled = !voiceReady;
-    document.getElementById('avatarConnectBtn').disabled = !config.avatar_enabled;
+    faceEnabled = config.avatar_enabled;
     if (Number.isFinite(config.avatar_connect_timeout_ms) && config.avatar_connect_timeout_ms > 0) {
       window.realFace.connectTimeoutMs = config.avatar_connect_timeout_ms;
     }
+    if (!isTutorProcessing && !isAssistantSpeaking) connectFaceIfNeeded();
+    if (!faceEnabled) window.realFace.setStatus('Voice-only mode');
     if (!voiceReady) {
       notice.hidden = false;
       notice.dataset.reason = 'preview';
@@ -90,9 +108,21 @@ async function refreshServerStatus() {
 }
 refreshServerStatus();
 setInterval(refreshServerStatus, 10000);
+let hiddenPreviewTimer;
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshServerStatus();
+  clearTimeout(hiddenPreviewTimer);
+  if (!document.hidden) {
+    refreshServerStatus();
+    return;
+  }
+  // A background preview should release the shared renderer for the next visitor.
+  hiddenPreviewTimer = setTimeout(() => {
+    if (document.hidden && !isRecording && !isTutorProcessing && !isAssistantSpeaking) {
+      socket?.close();
+    }
+  }, 30000);
 });
+window.addEventListener('pagehide', () => socket?.close());
 
 // --- ENGLISH TUTOR STATE & TURN-TAKING ---
 let isAssistantSpeaking = false;
@@ -266,7 +296,9 @@ function ensureSocket() {
       clearTimeout(connectionTimeout);
       if (socket !== connection) return;
       reject(new Error('Connection closed'));
-      window.realFace?.disconnect(false);
+      nextFaceAttempt = Date.now() + 30000;
+      window.realFace.disconnect(false);
+      if (faceWanted && faceEnabled) window.realFace.setStatus('Waiting to reconnect to Sway…');
       cleanupAudio();
       setStatus("OFFLINE", "#666");
       if (isRecording) {
@@ -430,6 +462,7 @@ function handleChatSubmit() {
   if (!val || !val.trim()) return;
   if (isTutorProcessing || isAssistantSpeaking) return;
   chatInput.value = "";
+  prepareConversation();
   sendUserText(val);
 }
 
@@ -448,6 +481,7 @@ if (sendBtn) {
 // --- CONNECTION LIFECYCLE ---
 async function startConnection() {
   if (!voiceReady) return;
+  prepareConversation();
   try {
     await ensureSocket();
   } catch (err) {
@@ -484,6 +518,7 @@ async function startConnection() {
 }
 
 function stopConnection() {
+  faceWanted = false;
   if (speechSilenceTimer) {
     clearTimeout(speechSilenceTimer);
     speechSilenceTimer = null;
@@ -786,6 +821,7 @@ function handleJSONMessage({ type, content, sample_rate }) {
   if (type === 'session_busy') {
     const notice = document.getElementById('setupNotice');
     notice.hidden = false;
+    notice.dataset.reason = 'busy';
     notice.textContent = content;
     return;
   }
@@ -920,8 +956,16 @@ window.realFace.configure({
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: 'tts_start'}));
   },
   onTurnEnd: onTTSPlaybackEnded,
-  onReady: () => stopAllTTSPlayback(false),
+  onReady: () => {
+    stopAllTTSPlayback(false);
+    const notice = document.getElementById('setupNotice');
+    if (notice.dataset.reason === 'busy') {
+      notice.hidden = true;
+      delete notice.dataset.reason;
+    }
+  },
   onFailure: () => {
+    nextFaceAttempt = Date.now() + 30000;
     onTTSPlaybackEnded();
     isAssistantSpeaking = false;
     isTutorProcessing = false;

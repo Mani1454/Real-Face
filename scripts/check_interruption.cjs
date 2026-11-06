@@ -12,7 +12,6 @@ const {chromium}=require('@playwright/test');
       });
     });
     await page.goto(process.argv[2]||'http://localhost:8000');
-    await page.locator('#avatarConnectBtn').click();
     await page.waitForFunction(()=>window.realFace.active,null,{timeout:180000});
     await page.locator('#chatInput').fill('Tell me a short sentence about visiting a park.');
     await page.locator('#sendBtn').click();
@@ -38,7 +37,7 @@ const {chromium}=require('@playwright/test');
     result.interruptRequests=sent.filter(type=>type==='interrupt').length;
     result.duplicateAvatarInterrupts=sent.filter(type=>type==='avatar_interrupt').length;
     result.passed=result.pauseMs<100&&result.serverClearMs<2000&&result.mutedImmediately&&result.pausedImmediately&&result.interruptRequests===1&&result.duplicateAvatarInterrupts===0;
-    await page.locator('#avatarConnectBtn').click();
+    await page.close();
     console.log(JSON.stringify(result));
     if(!result.passed)process.exitCode=1;
   }finally{await browser.close();}

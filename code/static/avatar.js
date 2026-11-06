@@ -12,36 +12,41 @@ class RealFaceAvatar {
     this.options = {};
     this.video = document.getElementById('avatarVideo');
     this.status = document.getElementById('avatarStatus');
-    this.button = document.getElementById('avatarConnectBtn');
+    this.connecting = false;
+    this.soundRequested = false;
     this.playButton = document.getElementById('avatarPlayBtn');
-    this.button.onclick = () => this.toggle();
-    this.playButton.onclick = () => {
-      this.connection?.play().then(() => { this.playButton.hidden = true; })
-        .catch(() => this.setStatus('Tap again to enable sound and video.'));
-    };
+
+    this.playButton.onclick = () => this.enableSound();
   }
 
   configure(options) { this.options = options; }
   setStatus(text) { this.status.textContent = text; }
 
-  async toggle() {
-    if (this.connection || this.button.dataset.connecting === 'true') {
-      this.disconnect();
-      return;
-    }
-    this.button.dataset.connecting = 'true';
+  enableSound() {
+    this.soundRequested = true;
+    const connection = this.connection;
+    if (!connection) return;
+    connection.play().then(() => {
+      if (this.connection === connection) this.playButton.hidden = true;
+    }).catch(() => {
+      if (this.connection === connection) this.playButton.hidden = false;
+    });
+  }
+
+  async connect() {
+    if (this.connection || this.connecting) return;
+    this.connecting = true;
     const generation = ++this.generation;
-    this.button.textContent = 'Cancel connection';
     this.setStatus('Connecting to your tutor…');
     this.connectTimer = setTimeout(() => {
       if (generation === this.generation && !this.active) {
-        this.fail('Connection took too long. Try connecting again.');
+        this.fail('Sway’s live face is taking longer than usual. Retrying shortly…');
       }
     }, this.connectTimeoutMs);
     try {
       await this.options.connect();
       // The user may cancel while the WebSocket is connecting.
-      if (generation === this.generation && this.button.dataset.connecting === 'true') {
+      if (generation === this.generation && this.connecting) {
         this.options.send({type: 'avatar_start'});
       }
     } catch {
@@ -52,9 +57,9 @@ class RealFaceAvatar {
   handleMessage({type, content}) {
     if (!type.startsWith('avatar_')) return false;
     if (type === 'avatar_session') {
-      if (this.button.dataset.connecting === 'true') void this.attach(content);
+      if (this.connecting) void this.attach(content);
     }
-    else if (type === 'avatar_status' && this.button.dataset.connecting === 'true') this.setStatus(content);
+    else if (type === 'avatar_status' && this.connecting) this.setStatus(content);
     else if (type === 'avatar_error') this.fail(content);
     else if (type === 'avatar_turn_start') {
       this.interrupted = false;
@@ -85,11 +90,11 @@ class RealFaceAvatar {
           if (!this.active) {
             this.options.onReady?.();
             this.active = true;
+            if (this.soundRequested) this.enableSound();
             this.options.send({type: 'avatar_ready'});
           }
           this.setStatus('Live face connected · Ready to listen');
-          this.button.textContent = 'Disconnect face';
-          this.button.dataset.connecting = 'false';
+          this.connecting = false;
         } else if (event.detail === 'speaking') {
           if (this.interrupted || this.speaking) return;
           this.speaking = true;
@@ -98,7 +103,7 @@ class RealFaceAvatar {
           this.setStatus('Your tutor is speaking');
           this.options.onSpeaking?.();
         } else if (event.detail === 'disconnected' || event.detail === 'error') {
-          this.fail('Live face disconnected. Reconnect to restore video.');
+          this.fail('Live face disconnected. Retrying shortly…');
         }
       });
       connection.addEventListener('autoplayblocked', () => {
@@ -136,14 +141,14 @@ class RealFaceAvatar {
     this.interrupted = false;
     const previous = this.connection;
     this.connection = null;
+    this.soundRequested = false;
     previous?.close();
     this.video.hidden = true;
-    this.video.muted = false;
+    this.video.muted = true;
     this.playButton.hidden = true;
-    this.button.dataset.connecting = 'false';
-    this.button.textContent = 'Connect live face';
+    this.connecting = false;
     if (notify) this.options.send?.({type: 'avatar_stop'});
-    this.setStatus('Portrait preview · Connect to see your tutor move');
+    this.setStatus('Conversation ended');
   }
 
   fail(message) {

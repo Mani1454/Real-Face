@@ -76,14 +76,16 @@ export class SocketPlayback extends EventTarget {
             this.initialized = true;
             this.heartbeat = setInterval(() => this.send({ type: 'ping' }), 15000);
             this.timer = setInterval(() => this.tick(), 10);
-            // Autoplay may require a click. Never mark playback ready before permission.
-            if (this.context.state === 'suspended')
+            // Idle frames only need muted video. Start conversation unlocks Web Audio.
+            try {
+                await this.video.play();
+                this.send({ type: 'ready' });
+            } catch {
                 this.event('autoplayblocked');
-            else
-                await this.play().catch(() => this.event('autoplayblocked'));
+            }
         }
         else if (event.type === 'idle') {
-            if (event.epoch !== this.epoch || this.context?.state !== 'running')
+            if (event.epoch !== this.epoch || !this.initialized)
                 return;
             const bytes = Uint8Array.from(atob(event.image), (c) => c.charCodeAt(0));
             const image = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
